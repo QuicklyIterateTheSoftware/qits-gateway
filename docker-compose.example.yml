@@ -1,0 +1,47 @@
+# A worked example of the deployment topology this component exists for: the gateway is the ONLY
+# published listener, everything it fronts sits unpublished on the shared `qits-net` network and is
+# reached by DNS name. Copy it into the deployment that owns the qits stack — this file is an
+# example, not a runnable stack on its own (the `qits` service here is a placeholder for the real
+# qits app image).
+#
+#     docker compose -f docker-compose.example.yml up
+
+services:
+  gateway:
+    image: qits/gateway:latest
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      # The single public port of the whole deployment.
+      - "8080:8080"
+    environment:
+      # The route table as environment variables — QITS_GATEWAY_ROUTES_<NAME>_<KEY>.
+      QITS_GATEWAY_ROUTES_QITS_PATH_PREFIX: "/"
+      QITS_GATEWAY_ROUTES_QITS_HOST: "qits"
+      QITS_GATEWAY_ROUTES_QITS_PORT: "8080"
+      # Uncomment once artifacts runs as its own process — callers see no difference:
+      # QITS_GATEWAY_ROUTES_ARTIFACTS_PATH_PREFIX: "/api/artifacts"
+      # QITS_GATEWAY_ROUTES_ARTIFACTS_HOST: "qits-artifacts"
+    networks:
+      - qits-net
+    depends_on:
+      - qits
+    restart: unless-stopped
+
+  qits:
+    image: qits/app:latest
+    # Deliberately NO `ports:` — qits is reachable only through the gateway and from sibling
+    # containers on qits-net. That is the whole point: one front door.
+    expose:
+      - "8080"
+    networks:
+      - qits-net
+    restart: unless-stopped
+
+networks:
+  qits-net:
+    # The shared network qits and every workspace container already join, so the gateway can address
+    # them all by DNS name with no host-port publishing.
+    name: qits-net
+    external: true
