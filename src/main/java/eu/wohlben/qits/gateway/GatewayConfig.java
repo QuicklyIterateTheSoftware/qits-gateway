@@ -7,73 +7,53 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The gateway's whole configuration surface: a named route table plus the edge-header policy.
+ * The gateway's whole configuration surface: the main qits app (the catch-all), the split-out
+ * service registry, and the edge-header policy.
  *
- * <p>Routes are declared as {@code qits.gateway.routes.<name>.*} — the name is arbitrary and only
- * shows up in logs and the health check, so a deployment can call them {@code qits}, {@code
- * artifacts}, {@code telemetry}, … Every route is resolved from configuration ONLY: the gateway
- * never derives an upstream host or port from anything in the request, which is the same SSRF guard
- * qits' own {@code ServiceProxyRoute} keeps (it resolves origins exclusively from supervisor
- * state).
+ * <p><b>The service registry.</b> The gateway proxies to a fixed, named set of components — the
+ * {@link QitsService} enum. A service is <i>routed</i> only when {@code
+ * qits.gateway.proxy-hosts.<segment>} names its upstream host: the entry is both the on-switch and
+ * the target. The key is the public segment ({@code artifacts}, never {@code qits-artifacts}); a
+ * key that is not a known service is rejected at startup. The value is a bare host ({@code
+ * qits-artifacts}) or {@code host:port} ({@code qits-artifacts:9000}); with no port the gateway
+ * assumes {@code 8080}.
  *
- * <p>Since config sources include environment variables, a route is fully declarable without a
- * file: {@code QITS_GATEWAY_ROUTES_ARTIFACTS_PATH_PREFIX=/api/artifacts}, {@code
- * QITS_GATEWAY_ROUTES_ARTIFACTS_HOST=qits-artifacts}, …
+ * <p><b>The catch-all.</b> Everything no service claims falls through to the qits monolith at
+ * {@code qits.gateway.app-host} / {@code app-port}. Left unset, there is no catch-all and unclaimed
+ * paths are answered with 404 by the gateway itself.
+ *
+ * <p>Every upstream is resolved from configuration ONLY: the gateway never derives a host or port
+ * from anything in a request, which is the SSRF guard qits' own {@code ServiceProxyRoute} keeps.
+ * Since config sources include environment variables, a deployment declares the whole table without
+ * a file: {@code QITS_GATEWAY_APP_HOST=qits}, {@code
+ * QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS=qits-artifacts}.
  */
 @ConfigMapping(prefix = "qits.gateway")
 public interface GatewayConfig {
 
-  /** The route table, keyed by an arbitrary route name. */
-  Map<String, Route> routes();
+  /**
+   * The main qits app — the catch-all every unclaimed path is forwarded to. Unset ⇒ no catch-all; a
+   * path no service claims then 404s at the gateway. ({@code qits.gateway.app-host})
+   */
+  Optional<String> appHost();
+
+  /** The catch-all's upstream port. ({@code qits.gateway.app-port}) */
+  @WithDefault("8080")
+  int appPort();
+
+  /**
+   * The enabled services, keyed by public {@link QitsService#segment() segment}: {@code
+   * qits.gateway.proxy-hosts.<segment> = host} (or {@code host:port}). Only listed services are
+   * routed; a key that is not a known service is a startup error.
+   */
+  Map<String, String> proxyHosts();
 
   /** Edge-header handling — what the gateway tells upstreams about the original client. */
   Forwarded forwarded();
 
-  interface Route {
-
-    /**
-     * The inbound path prefix this route claims, e.g. {@code /api/artifacts}. {@code /} is the
-     * catch-all (typically the qits app itself). Matching is longest-prefix and segment-aware:
-     * {@code /api/art} does NOT match {@code /api/artifacts/…}.
-     */
-    String pathPrefix();
-
-    /**
-     * Upstream hostname — a DNS name on the shared docker network, never a client-supplied value.
-     */
-    String host();
-
-    /** Upstream port. */
-    @WithDefault("8080")
-    int port();
-
-    /**
-     * Strip {@link #pathPrefix()} before forwarding. Off by default: qits' own routes (and its SPA)
-     * expect the full path, and prefix-stripping breaks apps that emit absolute-root asset URLs.
-     * When on, the stripped prefix is announced upstream as {@code X-Forwarded-Prefix}.
-     */
-    @WithDefault("false")
-    boolean stripPrefix();
-
-    /**
-     * Override the {@code Host}/{@code :authority} header sent upstream. Unset ⇒ the upstream's own
-     * {@code host:port} (vertx-http-proxy's default). Needed for upstreams that validate Host — dev
-     * servers reject anything that isn't localhost or allow-listed, which is why qits' daemon proxy
-     * rewrites it to {@code localhost}.
-     */
-    Optional<String> authority();
-
-    /** Take the route out of service without deleting its configuration. */
-    @WithDefault("true")
-    boolean enabled();
-  }
-
   interface Forwarded {
 
-    /**
-     * Emit {@code X-Forwarded-For} / {@code -Proto} / {@code -Host} / {@code -Port} (and {@code
-     * -Prefix} for stripped routes) toward upstreams.
-     */
+    /** Emit {@code X-Forwarded-For} / {@code -Proto} / {@code -Host} / {@code -Port} upstream. */
     @WithDefault("true")
     boolean enabled();
 

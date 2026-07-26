@@ -10,11 +10,12 @@ import java.util.Map;
 
 /**
  * A throwaway upstream that echoes back what the gateway forwarded — the request target and the
- * headers that matter for the edge contract — plus the two routes pointing at it.
+ * headers that matter for the edge contract — plus the service routes pointing at it.
  *
  * <p>A JDK {@code HttpServer} on an ephemeral port, so the test needs no docker, no fixture and no
- * fixed port. The routes are handed to Quarkus as configuration at start, which is the only way the
- * port (known only after binding) can reach the route table.
+ * fixed port. Two real {@link QitsService} segments ({@code artifacts}, {@code otel}) are pointed
+ * at the stub via {@code qits.gateway.proxy-hosts.*}; the config is handed to Quarkus at start,
+ * which is the only way the port (known only after binding) can reach the route table.
  */
 public class StubUpstream implements QuarkusTestResourceLifecycleManager {
 
@@ -38,7 +39,6 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
                       "x-forwarded-for=" + header(exchange, "X-Forwarded-For"),
                       "x-forwarded-host=" + header(exchange, "X-Forwarded-Host"),
                       "x-forwarded-proto=" + header(exchange, "X-Forwarded-Proto"),
-                      "x-forwarded-prefix=" + header(exchange, "X-Forwarded-Prefix"),
                       "remote-user=" + header(exchange, "Remote-User"))
                   + "\n";
           byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
@@ -52,14 +52,10 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
 
     int port = server.getAddress().getPort();
     Map<String, String> config = new HashMap<>();
-    // A prefix-stripping route and a verbatim one, so both forwarding shapes are exercised.
-    config.put("qits.gateway.routes.stub.path-prefix", "/stub");
-    config.put("qits.gateway.routes.stub.host", "127.0.0.1");
-    config.put("qits.gateway.routes.stub.port", String.valueOf(port));
-    config.put("qits.gateway.routes.stub.strip-prefix", "true");
-    config.put("qits.gateway.routes.verbatim.path-prefix", "/verbatim");
-    config.put("qits.gateway.routes.verbatim.host", "127.0.0.1");
-    config.put("qits.gateway.routes.verbatim.port", String.valueOf(port));
+    // Two real services pointed at the stub — exercising host:port parsing and that distinct
+    // segments each resolve to their own route.
+    config.put("qits.gateway.proxy-hosts.artifacts", "127.0.0.1:" + port);
+    config.put("qits.gateway.proxy-hosts.otel", "127.0.0.1:" + port);
     return config;
   }
 

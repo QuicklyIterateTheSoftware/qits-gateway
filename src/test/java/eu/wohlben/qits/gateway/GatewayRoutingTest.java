@@ -15,32 +15,21 @@ import org.junit.jupiter.api.Test;
 class GatewayRoutingTest {
 
   @Test
-  void forwardsVerbatimByDefault() {
+  void forwardsToTheServiceVerbatim() {
+    // /artifacts/… reaches qits-artifacts as /artifacts/… — the public path is not stripped.
     given()
         .when()
-        .get("/verbatim/deep/path?q=1")
+        .get("/artifacts/deep/path?q=1")
         .then()
         .statusCode(200)
-        .body(containsString("path=/verbatim/deep/path?q=1"));
-  }
-
-  @Test
-  void stripsThePrefixWhenTheRouteAsksForIt() {
-    given()
-        .when()
-        .get("/stub/hello?q=1")
-        .then()
-        .statusCode(200)
-        .body(containsString("path=/hello?q=1"))
-        // …and tells the upstream what was removed, so it can still build outside-visible URLs.
-        .body(containsString("x-forwarded-prefix=/stub"));
+        .body(containsString("path=/artifacts/deep/path?q=1"));
   }
 
   @Test
   void describesTheOriginalClientToTheUpstream() {
     given()
         .when()
-        .get("/verbatim/x")
+        .get("/artifacts/x")
         .then()
         .statusCode(200)
         .body(containsString("x-forwarded-proto=http"))
@@ -55,7 +44,7 @@ class GatewayRoutingTest {
     given()
         .header("Remote-User", "attacker")
         .when()
-        .get("/verbatim/x")
+        .get("/artifacts/x")
         .then()
         .statusCode(200)
         .body(containsString("remote-user=-"));
@@ -69,6 +58,13 @@ class GatewayRoutingTest {
         .then()
         .statusCode(404)
         .body(containsString("No qits component is routed here."));
+  }
+
+  @Test
+  void aSegmentThatIsNotAConfiguredServiceIsNotRouted() {
+    // `stt` is a known service but has no proxy-hosts entry in the test config, so it is not live —
+    // only services the deployment actually enabled are routed.
+    given().when().get("/stt/x").then().statusCode(404);
   }
 
   @Test

@@ -39,13 +39,19 @@ review topic — but it needs JDK 21+; build on the JDK 25 that `.sdkmanrc` pins
 
 ```
 src/main/java/eu/wohlben/qits/gateway/
+  QitsService.java            the registry: enum of proxyable services; segment/host derivation
   GatewayConfig.java          @ConfigMapping — the entire configuration surface
-  GatewayRoute.java           one resolved route; matching + path rewriting (framework-free)
-  RouteTable.java             longest-prefix resolution over the configured routes
+  GatewayRoute.java           one resolved route; prefix matching (framework-free)
+  RouteTable.java             config -> routes (segment validation, host:port parse); longest-prefix
   GatewayRouter.java          the catch-all Vert.x route; one HttpProxy per route
-  EdgeHeaders.java            the only rewrites: header hygiene, prefix strip, X-Forwarded-*
+  EdgeHeaders.java            the only rewrites: header hygiene + X-Forwarded-* (verbatim otherwise)
   RouteTableHealthCheck.java  readiness = a non-empty route table
 ```
+
+Routing is **verbatim** (no path rewriting): a service is reached at `/<segment>/*` and the upstream
+sees that path unchanged. Services are the closed `QitsService` set; a service is live only when a
+`qits.gateway.proxy-hosts.<segment>` entry names its host. The `/` catch-all is the qits monolith
+(`qits.gateway.app-host`). Add a service by extending the enum, not by inventing a config key.
 
 ## Conventions
 
@@ -54,8 +60,9 @@ src/main/java/eu/wohlben/qits/gateway/
 - **Header hygiene is a contract**, not a nicety: qits' `forwardauth` variant believes identity
   headers unconditionally. `qits.gateway.forwarded.strip-request-headers` may be extended, never
   shrunk below the identity headers a fronted qits build trusts.
-- Put edge-case logic (matching, rewriting) on the framework-free value types so it stays unit
-  testable without booting the application; `RouteTableTest` is where those cases belong.
+- Put edge-case logic (prefix matching, segment validation, host:port parsing) on the framework-free
+  value types so it stays unit testable without booting the application; `RouteTableTest` is where
+  those cases belong.
   End-to-end behaviour goes in `GatewayRoutingTest`, which proxies to a real stub upstream.
 - Add a regression test with every bug fix. Tests are JUnit `*Test.java`.
 - Keep the Quarkus platform version and the JDK release in step with the qits monorepo when it moves

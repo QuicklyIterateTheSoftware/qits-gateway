@@ -16,13 +16,15 @@ services:
       # The single public port of the whole deployment.
       - "8080:8080"
     environment:
-      # The route table as environment variables — QITS_GATEWAY_ROUTES_<NAME>_<KEY>.
-      QITS_GATEWAY_ROUTES_QITS_PATH_PREFIX: "/"
-      QITS_GATEWAY_ROUTES_QITS_HOST: "qits"
-      QITS_GATEWAY_ROUTES_QITS_PORT: "8080"
-      # Uncomment once artifacts runs as its own process — callers see no difference:
-      # QITS_GATEWAY_ROUTES_ARTIFACTS_PATH_PREFIX: "/api/artifacts"
-      # QITS_GATEWAY_ROUTES_ARTIFACTS_HOST: "qits-artifacts"
+      # The catch-all: everything no service below claims goes to the qits monolith.
+      QITS_GATEWAY_APP_HOST: "qits"
+      QITS_GATEWAY_APP_PORT: "8080"
+      # Split-out services (the QitsService registry) — QITS_GATEWAY_PROXY_HOSTS_<SEGMENT>. The
+      # public path drops the qits- prefix (qits-artifacts -> /artifacts/*); the value is the
+      # container's qits-net name (host, or host:port). Uncomment each as its process goes live —
+      # callers see no difference, it is the same origin with a new upstream:
+      # QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS: "qits-artifacts"
+      # QITS_GATEWAY_PROXY_HOSTS_OTEL: "qits-otel"
     networks:
       - qits-net
     depends_on:

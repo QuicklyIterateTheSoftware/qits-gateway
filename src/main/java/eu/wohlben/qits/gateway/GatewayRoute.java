@@ -1,37 +1,39 @@
 package eu.wohlben.qits.gateway;
 
-import java.util.Optional;
-
 /**
  * One resolved entry of the route table: an inbound path prefix and the upstream it delegates to.
+ * The gateway forwards verbatim, so a route is purely "which path prefix maps to which upstream" —
+ * no path rewriting.
  *
- * <p>Deliberately a plain value type with no Quarkus or Vert.x types on it, so the matching and
- * path-rewriting rules — the part with actual edge cases — are unit-testable without booting an
- * application (see {@code RouteTableTest}).
+ * <p>Deliberately a plain value type with no Quarkus or Vert.x types on it, so the matching rules
+ * and the {@code host[:port]} parsing — the parts with actual edge cases — are unit-testable
+ * without booting an application (see {@code RouteTableTest}).
  *
- * @param name the configuration key the route was declared under; used in logs and health output
+ * @param name the service segment (or {@code "qits"} for the catch-all); used in logs and health
  * @param prefix the normalised prefix: no trailing slash, and {@code ""} for the catch-all {@code
  *     /}
  * @param host upstream hostname (config only, never request-derived)
  * @param port upstream port
- * @param stripPrefix whether {@link #prefix} is removed from the path before forwarding
- * @param authority optional {@code Host} header override for the upstream
  */
-public record GatewayRoute(
-    String name,
-    String prefix,
-    String host,
-    int port,
-    boolean stripPrefix,
-    Optional<String> authority) {
+public record GatewayRoute(String name, String prefix, String host, int port) {
 
   public GatewayRoute {
     prefix = normalisePrefix(prefix);
   }
 
+  /** The route for a service: it claims {@code /<segment>} and forwards to the configured host. */
+  public static GatewayRoute forService(QitsService service, String host, int port) {
+    return new GatewayRoute(service.segment(), service.pathPrefix(), host, port);
+  }
+
+  /** The catch-all route to the qits monolith: claims {@code /}, matches everything unclaimed. */
+  public static GatewayRoute catchAll(String host, int port) {
+    return new GatewayRoute("qits", "/", host, port);
+  }
+
   /**
    * {@code /} ⇒ {@code ""} (matches everything), otherwise a leading slash is enforced and a
-   * trailing one dropped, so {@code /api/artifacts/} and {@code api/artifacts} are the same route.
+   * trailing one dropped, so {@code /artifacts/} and {@code artifacts} are the same route.
    */
   static String normalisePrefix(String raw) {
     String p = raw == null ? "" : raw.trim();
@@ -50,28 +52,15 @@ public record GatewayRoute(
   }
 
   /**
-   * Segment-aware prefix match: {@code /api/art} must NOT capture {@code /api/artifacts/x}, or a
-   * route table would silently hijack a sibling's traffic. The prefix itself ({@code
-   * /api/artifacts}) and everything under it ({@code /api/artifacts/…}) match.
+   * Segment-aware prefix match: {@code /ci} must NOT capture {@code /cicd/x}, or a route table
+   * would silently hijack a sibling's traffic. The prefix itself ({@code /artifacts}) and
+   * everything under it ({@code /artifacts/…}) match.
    */
   public boolean matches(String path) {
     if (isCatchAll()) {
       return true;
     }
     return path.equals(prefix) || path.startsWith(prefix + "/");
-  }
-
-  /**
-   * The path to send upstream. Verbatim unless {@link #stripPrefix} is on, in which case the prefix
-   * is removed and the remainder always keeps its leading slash ({@code /api/artifacts} ⇒ {@code
-   * /}, not the empty string, which is not a legal request target).
-   */
-  public String rewrite(String path) {
-    if (!stripPrefix || isCatchAll()) {
-      return path;
-    }
-    String rest = path.substring(prefix.length());
-    return rest.isEmpty() ? "/" : rest;
   }
 
   /** {@code host:port}, for logs and the health check. */

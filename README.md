@@ -60,56 +60,79 @@ protocol, dev-server HMR sockets and large artifact uploads working through the 
                        │   route table  ·  edge headers  ·  health   │
                        └───────┬───────────────┬──────────────┬──────┘
                                │  qits-net (DNS names, nothing published)
-                 /api/artifacts│        /api/otel│             /│
+                     /artifacts│           /otel│             /│
                       ┌────────▼──────┐ ┌────────▼──────┐ ┌─────▼───────────┐
-                      │ qits-artifacts│ │ qits-telemetry│ │ qits (app + SPA)│
+                      │ qits-artifacts│ │   qits-otel   │ │ qits (app + SPA)│
                       └───────────────┘ └───────────────┘ └─────────────────┘
 ```
 
-**Resolution is longest-prefix-wins**, regardless of declaration order: `/api/artifacts` beats
-`/api` beats the `/` catch-all. Matching is **segment-aware** — `/api/art` never captures
-`/api/artifacts/…`. A path no route claims is answered with **404 by the gateway itself**; it opens
-no connection.
+The set of services the gateway can front is a **named registry** — the `QitsService` enum. A
+service's public identity drops the `qits-` prefix, so `qits-artifacts` is reached at `/artifacts/*`
+and forwarded to the `qits-artifacts` container. Which services are *live* is a deployment decision
+(see [Configuration](#configuration)); everything they do not claim falls through to the qits
+monolith.
 
-Forwarding is **verbatim by default** (no prefix stripping): qits' own routes and its SPA expect the
-paths they already serve, and stripping breaks apps that emit absolute-root asset URLs. Routes that
-*want* stripping opt in per route, and the removed prefix is announced upstream as
-`X-Forwarded-Prefix`.
+**Resolution is longest-prefix-wins**, regardless of declaration order: `/artifacts` beats the `/`
+catch-all. Matching is **segment-aware** — `/art` never captures `/artifacts/…`, and `/ci` never
+captures `/cicd/…`. A path no route claims (and no live service) is answered with **404 by the
+gateway itself**; it opens no connection.
+
+Forwarding is **verbatim**: the upstream sees the path unchanged (`/artifacts/blobs` reaches
+qits-artifacts as `/artifacts/blobs`), so a service and the qits SPA both get exactly the paths they
+serve and nothing breaks apps that emit absolute-root asset URLs.
 
 ## Configuration
 
 Everything is MicroProfile config, so any key works as a property, a system property or an
-environment variable. The route table:
+environment variable. The **catch-all** (the qits monolith):
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `qits.gateway.routes.<name>.path-prefix` | — | inbound prefix this route claims; `/` is the catch-all |
-| `qits.gateway.routes.<name>.host` | — | upstream DNS name (configuration only, never request-derived) |
-| `qits.gateway.routes.<name>.port` | `8080` | upstream port |
-| `qits.gateway.routes.<name>.strip-prefix` | `false` | remove the prefix before forwarding |
-| `qits.gateway.routes.<name>.authority` | upstream `host:port` | override the `Host` header sent upstream |
-| `qits.gateway.routes.<name>.enabled` | `true` | take a route out of service without deleting it |
+| `qits.gateway.app-host` | — | qits monolith DNS name; unset ⇒ no catch-all (unclaimed paths 404) |
+| `qits.gateway.app-port` | `8080` | qits monolith port |
 
-`<name>` is arbitrary and appears only in logs and health output. As environment variables:
+The **service registry** — one entry per live split-out service, keyed by its public segment:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `qits.gateway.proxy-hosts.<segment>` | — | upstream `host` or `host:port` for that service; the entry both enables the service and names its target |
+
+`<segment>` must be a known service — one of the `QitsService` enum values below; an unknown segment
+is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim. A service is routed
+**only** when it has a `proxy-hosts` entry, so undeployed services simply 404 rather than 502.
+
+| Service (submodule) | Segment | Reached at | Default host |
+| --- | --- | --- | --- |
+| `qits-artifacts` | `artifacts` | `/artifacts/*` | `qits-artifacts` |
+| `qits-otel` | `otel` | `/otel/*` | `qits-otel` |
+| `qits-workspaces` | `workspaces` | `/workspaces/*` | `qits-workspaces` |
+| `qits-stt` | `stt` | `/stt/*` | `qits-stt` |
+| `qits-ci` | `ci` | `/ci/*` | `qits-ci` |
+| `qits-cd` | `cd` | `/cd/*` | `qits-cd` |
+| `qits-repositories` | `repositories` | `/repositories/*` | `qits-repositories` |
+
+(The "default host" is the container's `qits-net` DNS name — what you would normally put in the
+`proxy-hosts` value. Add a service to the enum when a new component splits out.) As environment
+variables:
 
 ```bash
-QITS_GATEWAY_ROUTES_QITS_PATH_PREFIX=/
-QITS_GATEWAY_ROUTES_QITS_HOST=qits
-QITS_GATEWAY_ROUTES_ARTIFACTS_PATH_PREFIX=/api/artifacts
-QITS_GATEWAY_ROUTES_ARTIFACTS_HOST=qits-artifacts
+QITS_GATEWAY_APP_HOST=qits
+QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS=qits-artifacts
+QITS_GATEWAY_PROXY_HOSTS_OTEL=qits-otel:9000     # host:port when the service is not on 8080
 ```
 
 Edge headers:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `qits.gateway.forwarded.enabled` | `true` | emit `X-Forwarded-For`/`-Proto`/`-Host`/`-Port`/`-Prefix` |
+| `qits.gateway.forwarded.enabled` | `true` | emit `X-Forwarded-For`/`-Proto`/`-Host`/`-Port` |
 | `qits.gateway.forwarded.strip-request-headers` | the identity headers below | request headers dropped from every inbound request |
 
-The shipped `application.properties` defaults to today's topology — a single `/` route to `qits:8080`
-— and carries commented entries for the artifacts/telemetry splits. Other settings worth knowing:
-`quarkus.http.limits.max-body-size` (must be ≥ the largest upload any fronted component accepts) and
-`quarkus.http.idle-timeout=1H` (long-lived SSE/HMR/git exchanges pass through here).
+The shipped `application.properties` defaults to today's topology — the `/` catch-all to `qits:8080`
+— and carries the whole enum as commented `proxy-hosts` lines, ready to uncomment as each service
+goes live. Other settings worth knowing: `quarkus.http.limits.max-body-size` (must be ≥ the largest
+upload any fronted component accepts) and `quarkus.http.idle-timeout=1H` (long-lived SSE/HMR/git
+exchanges pass through here).
 
 ## Security posture
 
@@ -169,7 +192,8 @@ docker build -t qits/gateway:latest -f docker/Dockerfile .
 Point it at something without touching a file:
 
 ```bash
-./mvnw quarkus:dev -Dqits.gateway.routes.qits.host=localhost -Dqits.gateway.routes.qits.port=8080
+./mvnw quarkus:dev -Dqits.gateway.app-host=localhost \
+                   -Dqits.gateway.proxy-hosts.artifacts=127.0.0.1:9000
 ```
 
 ## Deployment
@@ -196,15 +220,15 @@ be upgraded independently of what it fronts.
 
 ## Status & roadmap
 
-Implemented: the route table (config-driven, longest-prefix, segment-aware), streaming reverse proxy
-with WebSocket passthrough, per-route prefix stripping, edge-header hygiene, health/readiness,
-native build, container image.
+Implemented: the `QitsService` registry (a named, enum-backed set of proxyable services),
+config-driven longest-prefix / segment-aware routing, verbatim streaming reverse proxy with
+WebSocket passthrough, edge-header hygiene, health/readiness, native build, container image.
 
 Planned, per the epic's staging:
 
 - **Workspace addressability** — a general `/ws/{workspaceId}/{service}/*` scheme resolving the
   origin from qits-held state, generalising qits' current daemon web-view proxy.
-- **Fronting split-out siblings** — as artifacts/telemetry become their own processes, they are added
-  to the route table and nothing changes for callers.
+- **Fronting split-out siblings** — as artifacts, telemetry and the rest become their own processes,
+  each is enabled with a `proxy-hosts` entry and nothing changes for callers.
 - **Subsuming the edge** — TLS termination and edge authentication in the gateway, so a standard qits
   deployment needs no external reverse proxy at all.

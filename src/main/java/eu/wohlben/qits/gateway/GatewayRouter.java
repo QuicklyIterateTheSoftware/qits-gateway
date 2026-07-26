@@ -66,12 +66,14 @@ public class GatewayRouter {
 
   void init(@Observes Router router) {
     client = vertx.createHttpClient(new HttpClientOptions().setKeepAlive(true));
+    // Nothing the interceptor does is route-specific (verbatim forwarding), so one is shared.
+    EdgeHeaders edgeHeaders = new EdgeHeaders(config.forwarded());
     for (GatewayRoute route : routeTable.routes()) {
       proxies.put(
           route.name(),
           HttpProxy.reverseProxy(client)
               .origin(route.port(), route.host())
-              .addInterceptor(new EdgeHeaders(route, config.forwarded())));
+              .addInterceptor(edgeHeaders));
     }
     router.route().order(ROUTE_ORDER).handler(this::handle);
   }
@@ -86,11 +88,8 @@ public class GatewayRouter {
         .forEach(
             r ->
                 LOG.infof(
-                    "route %-12s %-20s -> %s%s",
-                    r.name(),
-                    r.isCatchAll() ? "/*" : r.prefix() + "/*",
-                    r.upstream(),
-                    r.stripPrefix() ? " (prefix stripped)" : ""));
+                    "route %-14s %-16s -> %s",
+                    r.name(), r.isCatchAll() ? "/*" : r.prefix() + "/*", r.upstream()));
   }
 
   private void handle(RoutingContext rc) {
