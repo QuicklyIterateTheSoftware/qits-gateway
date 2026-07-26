@@ -19,9 +19,9 @@ class QitsServiceTest {
 
   @Test
   void forSegmentResolvesKnownServicesAndIsCaseInsensitive() {
-    assertEquals(Optional.of(QitsService.OTEL), QitsService.forSegment("otel"));
-    assertEquals(Optional.of(QitsService.OTEL), QitsService.forSegment("OTEL"));
-    assertEquals(Optional.of(QitsService.REPOSITORIES), QitsService.forSegment(" repositories "));
+    assertEquals(Optional.of(QitsService.OBSERVABILITY), QitsService.forSegment("observability"));
+    assertEquals(Optional.of(QitsService.OBSERVABILITY), QitsService.forSegment("OBSERVABILITY"));
+    assertEquals(Optional.of(QitsService.PROJECTS), QitsService.forSegment(" projects "));
   }
 
   @Test

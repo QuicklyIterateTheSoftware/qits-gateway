@@ -32,10 +32,13 @@ class RouteTableTest {
   @Test
   void longestPrefixWinsRegardlessOfDeclarationOrder() {
     RouteTable table =
-        table(route("qits", "/"), route("artifacts", "/artifacts"), route("otel", "/otel"));
+        table(
+            route("qits", "/"),
+            route("artifacts", "/artifacts"),
+            route("observability", "/observability"));
 
     assertEquals("artifacts", matched(table, "/artifacts/blobs/abc"));
-    assertEquals("otel", matched(table, "/otel/v1/traces"));
+    assertEquals("observability", matched(table, "/observability/v1/traces"));
     assertEquals("qits", matched(table, "/index.html"));
   }
 
@@ -78,11 +81,13 @@ class RouteTableTest {
   void eachServiceBecomesARouteAtItsSegmentPrefix() {
     List<GatewayRoute> routes =
         RouteTable.buildRoutes(
-            Optional.empty(), 8080, Map.of("artifacts", "qits-artifacts", "otel", "qits-otel"));
+            Optional.empty(),
+            8080,
+            Map.of("artifacts", "qits-artifacts", "observability", "qits-observability"));
     RouteTable table = RouteTable.of(routes);
 
     assertEquals("artifacts", matched(table, "/artifacts/blobs"));
-    assertEquals("otel", matched(table, "/otel/v1"));
+    assertEquals("observability", matched(table, "/observability/v1"));
     assertEquals(2, routes.size());
   }
 
@@ -92,13 +97,14 @@ class RouteTableTest {
         RouteTable.buildRoutes(
             Optional.empty(),
             8080,
-            Map.of("artifacts", "qits-artifacts", "otel", "qits-otel:9000"));
+            Map.of("artifacts", "qits-artifacts", "observability", "qits-observability:9000"));
 
     GatewayRoute artifacts =
         routes.stream().filter(r -> r.name().equals("artifacts")).findFirst().get();
-    GatewayRoute otel = routes.stream().filter(r -> r.name().equals("otel")).findFirst().get();
+    GatewayRoute observability =
+        routes.stream().filter(r -> r.name().equals("observability")).findFirst().get();
     assertEquals("qits-artifacts:8080", artifacts.upstream());
-    assertEquals("qits-otel:9000", otel.upstream());
+    assertEquals("qits-observability:9000", observability.upstream());
   }
 
   @Test

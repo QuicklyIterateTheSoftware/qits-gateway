@@ -30,12 +30,12 @@ import java.util.stream.Collectors;
  */
 public enum QitsService {
   ARTIFACTS,
-  OTEL,
+  OBSERVABILITY,
   WORKSPACES,
+  PROJECTS,
   STT,
   CI,
-  CD,
-  REPOSITORIES;
+  CD;
 
   /** The public path segment, with the {@code qits-} prefix dropped — e.g. {@code "artifacts"}. */
   public String segment() {

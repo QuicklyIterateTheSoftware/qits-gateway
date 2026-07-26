@@ -24,7 +24,7 @@ services:
       # container's qits-net name (host, or host:port). Uncomment each as its process goes live —
       # callers see no difference, it is the same origin with a new upstream:
       # QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS: "qits-artifacts"
-      # QITS_GATEWAY_PROXY_HOSTS_OTEL: "qits-otel"
+      # QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY: "qits-observability"
     networks:
       - qits-net
     depends_on:

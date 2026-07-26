@@ -60,10 +60,10 @@ protocol, dev-server HMR sockets and large artifact uploads working through the 
                        │   route table  ·  edge headers  ·  health   │
                        └───────┬───────────────┬──────────────┬──────┘
                                │  qits-net (DNS names, nothing published)
-                     /artifacts│           /otel│             /│
-                      ┌────────▼──────┐ ┌────────▼──────┐ ┌─────▼───────────┐
-                      │ qits-artifacts│ │   qits-otel   │ │ qits (app + SPA)│
-                      └───────────────┘ └───────────────┘ └─────────────────┘
+                     /artifacts│  /observability│             /│
+                      ┌────────▼──────┐ ┌────────▼──────────┐ ┌─────▼───────────┐
+                      │ qits-artifacts│ │qits-observability │ │ qits (app + SPA)│
+                      └───────────────┘ └───────────────────┘ └─────────────────┘
 ```
 
 The set of services the gateway can front is a **named registry** — the `QitsService` enum. A
@@ -104,12 +104,12 @@ is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim
 | Service (submodule) | Segment | Reached at | Default host |
 | --- | --- | --- | --- |
 | `qits-artifacts` | `artifacts` | `/artifacts/*` | `qits-artifacts` |
-| `qits-otel` | `otel` | `/otel/*` | `qits-otel` |
+| `qits-observability` | `observability` | `/observability/*` | `qits-observability` |
 | `qits-workspaces` | `workspaces` | `/workspaces/*` | `qits-workspaces` |
+| `qits-projects` | `projects` | `/projects/*` | `qits-projects` |
 | `qits-stt` | `stt` | `/stt/*` | `qits-stt` |
 | `qits-ci` | `ci` | `/ci/*` | `qits-ci` |
 | `qits-cd` | `cd` | `/cd/*` | `qits-cd` |
-| `qits-repositories` | `repositories` | `/repositories/*` | `qits-repositories` |
 
 (The "default host" is the container's `qits-net` DNS name — what you would normally put in the
 `proxy-hosts` value. Add a service to the enum when a new component splits out.) As environment
@@ -118,7 +118,7 @@ variables:
 ```bash
 QITS_GATEWAY_APP_HOST=qits
 QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS=qits-artifacts
-QITS_GATEWAY_PROXY_HOSTS_OTEL=qits-otel:9000     # host:port when the service is not on 8080
+QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY=qits-observability:9000   # host:port when not on 8080
 ```
 
 Edge headers:
