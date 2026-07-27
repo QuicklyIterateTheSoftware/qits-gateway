@@ -33,6 +33,7 @@
 
         <compiler-plugin.version>3.15.0</compiler-plugin.version>
         <surefire-plugin.version>3.5.4</surefire-plugin.version>
+        <enforcer-plugin.version>3.5.0</enforcer-plugin.version>
         <spotless-plugin.version>2.44.5</spotless-plugin.version>
         <google-java-format.version>1.28.0</google-java-format.version>
         <skipITs>true</skipITs>
@@ -85,10 +86,30 @@
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-smallrye-health</artifactId>
         </dependency>
+        <dependency>
+            <!-- The login itself. This is by far the largest thing this repo takes on, and it is
+                 taken on HERE precisely so that nothing else has to: seven services would each have
+                 needed the variant matrix, and each would have been independently mis-buildable.
+                 One component chooses a scheme; the rest have no scheme to choose.
+
+                 It stays on the classpath in the `local` target too — a single-module build cannot
+                 conditionally drop a compile dependency, and @IfBuildProperty conditions the beans
+                 rather than the jar. The cost is native-image size in a build that does not use it;
+                 see README "Native image cost". -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-oidc</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit5</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <!-- @TestSecurity: names the caller directly for the tests that are about routing and
+                 header hygiene rather than about the login. -->
+            <groupId>io.quarkus</groupId>
+            <artifactId>quarkus-test-security</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -143,6 +164,41 @@
                 </executions>
             </plugin>
             <plugin>
+                <!-- Packaging the gateway requires naming an auth target explicitly. Bound to
+                     prepare-package, not validate, on purpose: pre-packaging work — quarkus:dev,
+                     test — runs flagless and defaults to oauth (see application.properties), and
+                     only producing an artifact reaches this rule. A shipped gateway therefore
+                     always said out loud whether it authenticates. -->
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>${enforcer-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>require-auth-variant</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <requireProperty>
+                                    <property>qits.variant</property>
+                                    <regex>oauth|local</regex>
+                                    <message>Packaging qits-gateway requires an explicit auth target:
+  -Dqits.variant=oauth   OIDC login terminated at the gateway; requires QUARKUS_OIDC_* env at runtime
+  -Dqits.variant=local   EXPLICITLY UNAUTHENTICATED — every request is a fixed local user. Trusted LOCAL
+                         starts only (a laptop run, a test rig). NEVER internet-expose.
+(quarkus:dev and test default to oauth without the flag — a packaged build never defaults. The oauth
+ target never degrades to `local`; only naming `local` produces an open build.)
+See migration-auth-plan.md §5.</message>
+                                    <regexMessage>Unknown qits.variant — valid values are: oauth, local.
+See migration-auth-plan.md §5.</regexMessage>
+                                </requireProperty>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <!-- Same formatter as the qits monorepo (google-java-format, needs JDK 21+), applied
                      automatically on every build so formatting is never a review topic. -->
                 <groupId>com.diffplug.spotless</groupId>
@@ -169,6 +225,31 @@
     </build>
 
     <profiles>
+        <!-- The `local` build target, EXPLICITLY UNAUTHENTICATED: every request is a fixed local
+             user. For trusted local starts only — never internet-expose a local-target gateway.
+
+             The @IfBuildProperty guards in security/ condition the *beans* on qits.auth.variant
+             (see application.properties), but the OIDC *extension* has to be switched off too, and
+             only at build time. quarkus-oidc treats a missing auth-server-url as a fatal
+             misconfiguration, so a local gateway that still carried an enabled OIDC extension would
+             refuse to start without an IdP it does not use — which is precisely the overhead this
+             target exists to avoid. Verified by running the packaged artifact, not by reasoning.
+
+             quarkus.oidc.enabled is read at augmentation, so this cannot be undone at runtime any
+             more than the variant itself can. -->
+        <profile>
+            <id>variant-local</id>
+            <activation>
+                <property>
+                    <name>qits.variant</name>
+                    <value>local</value>
+                </property>
+            </activation>
+            <properties>
+                <quarkus.oidc.enabled>false</quarkus.oidc.enabled>
+            </properties>
+        </profile>
+
         <!-- GraalVM native build (mirrors qits' workspace-daemon): `-Dnative` disables the jar and
              enables the native image. There is no parent pom to inherit a native profile from, so it
              lives here. docker/Dockerfile's `build` stage runs `package -Dnative`. -->

@@ -30,8 +30,8 @@ qits-gateway makes that front door **explicit, named, and owned by us**:
 - **No host-port publishing.** Everything the gateway fronts stays unpublished on the shared
   `qits-net` docker network, reachable only by DNS name — the same addressing model qits already
   uses to reach workspace containers.
-- **A place for edge concerns.** Header hygiene today (see [Security posture](#security-posture)),
-  TLS termination and edge authentication as the epic's Part 4 lands.
+- **A place for edge concerns.** Header hygiene and [authentication](#authentication) live here
+  today; TLS termination is still to come.
 
 ### Why a separate deployable, and not code inside qits
 
@@ -155,9 +155,77 @@ exchanges pass through here).
   is client-supplied and worthless.
 - **The gateway's own management surface is never proxied.** `/q/*` is served locally even under a
   `/` catch-all route.
-- **No authentication of its own, yet.** Today the gateway forwards to components that authenticate
-  their own requests (qits' `QitsAuthPolicy`). TLS termination and edge authentication are Part 4 of
-  the epic and deliberately not implemented here.
+- **The gateway is the only thing that authenticates.** It performs the login, decides authorization
+  (`qits.auth.required-role`), and asserts the resulting identity downstream as `X-Qits-User` /
+  `X-Qits-User-Id`. Every other component consumes that header and authenticates nothing — see
+  [Authentication](#authentication).
+- **This is a perimeter against the internet, not a boundary on `qits-net`.** Every service sits
+  unpublished on the shared network, and so does every workspace container running a coding agent
+  over an untrusted checkout. `curl http://qits-projects:8080/api/…` from inside a workspace bypasses
+  the gateway entirely. That is accepted for now and is a *known* gap, not a covered one; nothing
+  here should be described as if the gateway bounded it.
+
+## Authentication
+
+The gateway authenticates every human request, injects the identity as request headers, and every
+other component consumes those headers instead of authenticating anything. One component chooses a
+scheme; the rest have no scheme to choose. (The alternative — a shared auth library — makes seven
+copies of the problem share a jar without making the problem smaller.)
+
+| Header | Value | Consumed as |
+| --- | --- | --- |
+| `X-Qits-User` | the principal **name** (`preferred_username`) | `SecurityIdentity.getPrincipal().getName()` |
+| `X-Qits-User-Id` | the stable subject id | an identity attribute; nothing reads it yet |
+
+The principal is the name and not the id because upstreams write it into audit columns whose existing
+rows hold usernames. **No groups header is emitted**: the one role check the system has happens here,
+so no service can make — or appear to make — a role decision of its own.
+
+Authorization is a single global check. `PublicPaths` is the token-free allowlist for callers that
+hold no user token by construction (workspace containers doing git/OTLP/MCP, health probes,
+`/api/auth/me`); everything else needs an identity.
+
+### Build targets
+
+The unauthenticated build has to stay reachable for testing and impossible to switch on by accident,
+so the target is a **build** property, never a runtime config key:
+
+```bash
+./mvnw package -Dqits.variant=oauth   # OIDC login; needs QUARKUS_OIDC_* at runtime
+./mvnw package -Dqits.variant=local   # EXPLICITLY UNAUTHENTICATED — never internet-expose
+```
+
+`quarkus:dev` and `test` default to `oauth` flagless; packaging without the flag is refused. The
+selection is baked into the recorded bean set at augmentation, so **no environment variable and no
+properties file can open a production gateway** — setting `QITS_AUTH_VARIANT=local` against an
+`oauth` build changes nothing at all.
+
+A `local` gateway synthesizes a fixed identity and emits the same `X-Qits-*` headers, so everything
+downstream is byte-identical between targets: test and production differ in exactly one component.
+
+### Native image cost
+
+`quarkus-oidc` is the largest extension this repo has taken on, and it stays on the classpath in both
+targets — a single-module build cannot conditionally drop a compile dependency, so `@IfBuildProperty`
+conditions the beans rather than the jar. The extension itself *is* switched off in the `local`
+target, which is what lets that build start with no IdP configured; what it cannot shed is the jar.
+
+Measured (`-Dquarkus.native.container-build=true`, same machine, same day):
+
+| Build | Native binary | vs. before |
+| --- | --- | --- |
+| before `quarkus-oidc` | 50,146,360 B | — |
+| `-Dqits.variant=local` (extension off, jar present) | 52,317,240 B | +2.2 MB, +4.3% |
+| `-Dqits.variant=oauth` | 56,286,264 B | +6.1 MB, +12.2% |
+
+Native generation time barely moved: 26.6 s → 27.6 s. The `local` row is the price of not being able
+to drop a compile dependency in a single-module build; the gap between the two targets is what OIDC
+actually costs when it is switched on.
+
+Judged acceptable: ~12% on a binary that exists to start in ~50 ms, in exchange for deleting the auth
+question from six other repositories. If it ever stops being acceptable, the escape hatch works
+unchanged: front the gateway with a forward-auth proxy and have it translate `Remote-User` into
+`X-Qits-User`. Nothing downstream would notice.
 
 ## Endpoints the gateway serves itself
 

@@ -1,6 +1,7 @@
 package eu.wohlben.qits.gateway;
 
 import io.quarkus.runtime.StartupEvent;
+import io.quarkus.vertx.http.runtime.security.QuarkusHttpUser;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientOptions;
@@ -36,6 +37,12 @@ import org.jboss.logging.Logger;
  * component ever selects a host or port. An unmatched path is answered with 404 by the gateway,
  * which never opens a connection. This is the same "resolve the target from our own state, never
  * from the request" rule qits' in-process proxies follow.
+ *
+ * <p>Authentication has already happened by the time this handler runs — Quarkus mounts the
+ * security handlers on the main router ahead of every user route, so an unauthorized request is
+ * challenged before it can select an upstream. What is left to do here is hand the resulting
+ * identity to {@link EdgeHeaders}, which is the only component that writes it onto the outbound
+ * request. See {@link AssertedIdentity} for why that hand-off looks the way it does.
  */
 @ApplicationScoped
 public class GatewayRouter {
@@ -108,6 +115,11 @@ public class GatewayRouter {
           .end("No qits component is routed here.\n");
       return;
     }
+    // Reaching here means the security policy already permitted the request, so this is the
+    // authenticated identity (or an anonymous one on a public path). EdgeHeaders cannot see the
+    // RoutingContext, so hand it over before the proxy takes the request.
+    AssertedIdentity.record(
+        rc.user() instanceof QuarkusHttpUser user ? user.getSecurityIdentity() : null);
     proxies.get(route.get().name()).handle(rc.request());
   }
 }

@@ -13,7 +13,7 @@ import java.util.List;
 /**
  * Everything the gateway rewrites on the way upstream — the only part of an exchange it touches at
  * all. The gateway forwards verbatim (paths and bodies pass through untouched), so this is header
- * work only, three jobs in this order:
+ * work only, four jobs in this order:
  *
  * <ol>
  *   <li><b>Drop every reserved header.</b> {@code X-Qits-*} is the gateway's own namespace: it is
@@ -24,6 +24,12 @@ import java.util.List;
  *       X-Auth-Request-*} list ({@code qits.gateway.forwarded.strip-request-headers}) covers a
  *       deployment that still fronts the gateway with a forward-auth proxy, whose header names are
  *       the proxy vendor's rather than ours.
+ *   <li><b>Assert the authenticated identity</b> — {@code X-Qits-User} and {@code X-Qits-User-Id},
+ *       from {@link AssertedIdentity}. This <b>must</b> stay after the strip and in this same
+ *       method: the forged header and the trusted one have the same name, so the code that writes
+ *       the trusted value has to be downstream of the code that removes the forged one. An
+ *       anonymous request asserts nothing, which is how an upstream sees "no name" rather than a
+ *       name it cannot trust.
  *   <li><b>Describe the original client</b> with the {@code X-Forwarded-*} set. {@code
  *       X-Forwarded-For} is <i>set</i>, not appended: the gateway is the outermost hop, so any
  *       inbound value is client-supplied and worthless.
@@ -47,6 +53,18 @@ final class EdgeHeaders implements ProxyInterceptor {
    * qits.gateway.forwarded.strip-request-headers} may be extended, but this cannot be shrunk away.
    */
   static final String RESERVED_PREFIX = "X-Qits-";
+
+  /**
+   * The principal <b>name</b>, not the id — it is what an upstream writes into an audit column, and
+   * the platform's existing rows hold usernames.
+   */
+  static final String USER_HEADER = RESERVED_PREFIX + "User";
+
+  /**
+   * The stable subject id. Nothing reads it yet; it is asserted from the start because adding a
+   * trusted header later means re-proving the strip rule, and carrying it now costs nothing.
+   */
+  static final String USER_ID_HEADER = RESERVED_PREFIX + "User-Id";
 
   private final GatewayConfig.Forwarded forwarded;
 
@@ -82,6 +100,15 @@ final class EdgeHeaders implements ProxyInterceptor {
       String name = header.trim();
       if (!name.isEmpty()) {
         request.headers().remove(name);
+      }
+    }
+
+    // Only now, with the namespace provably empty, is it safe to write into it.
+    AssertedIdentity identity = AssertedIdentity.current();
+    if (identity != null && identity.user() != null) {
+      request.headers().set(USER_HEADER, identity.user());
+      if (identity.userId() != null) {
+        request.headers().set(USER_ID_HEADER, identity.userId());
       }
     }
 

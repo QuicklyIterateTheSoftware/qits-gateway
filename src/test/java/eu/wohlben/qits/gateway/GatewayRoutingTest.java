@@ -7,10 +7,19 @@ import static org.hamcrest.Matchers.not;
 
 import io.quarkus.test.common.WithTestResource;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
 import org.junit.jupiter.api.Test;
 
-/** The gateway end to end: a real request in, a real forwarded request at a real upstream. */
+/**
+ * The gateway end to end: a real request in, a real forwarded request at a real upstream.
+ *
+ * <p>Named caller throughout, because the gateway now authenticates: every path here except the
+ * health probe is behind the policy, and an anonymous request would be challenged before routing
+ * ever ran. {@code @TestSecurity} keeps these tests about <em>routing</em> — who gets in is {@link
+ * eu.wohlben.qits.gateway.security.GatewayAuthTest}'s subject.
+ */
 @QuarkusTest
+@TestSecurity(user = "dev")
 @WithTestResource(StubUpstream.class)
 class GatewayRoutingTest {
 
@@ -51,10 +60,11 @@ class GatewayRoutingTest {
   }
 
   @Test
-  void clientSuppliedReservedHeadersNeverReachAnUpstream() {
+  void clientSuppliedReservedHeadersAreReplacedNotForwarded() {
     // The gateway's own namespace: an upstream believes X-Qits-User unconditionally, so a client
     // setting it through the front door would be a complete authentication bypass. Stripped by
-    // prefix, which is why the casing a client picks cannot matter.
+    // prefix, which is why the casing a client picks cannot matter — and only then replaced with
+    // what this request actually authenticated as.
     given()
         .header("X-Qits-User", "attacker")
         .header("x-qits-user-id", "00000000-0000-0000-0000-000000000000")
@@ -63,10 +73,10 @@ class GatewayRoutingTest {
         .get("/artifacts/x")
         .then()
         .statusCode(200)
-        .body(containsString("x-qits-user=-"))
-        .body(containsString("x-qits-user-id=-"))
+        .body(containsString("x-qits-user=dev"))
         .body(not(containsString("attacker")))
-        .body(not(containsString("admin")));
+        .body(not(containsString("admin")))
+        .body(not(containsString("00000000")));
   }
 
   @Test

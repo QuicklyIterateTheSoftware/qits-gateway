@@ -5,9 +5,10 @@ Guidance for AI coding agents working in this repository. `CLAUDE.md` is a symli
 ## What this is
 
 `qits-gateway` — the qits front door: a standalone Quarkus 3 (Java 25) reverse proxy that receives
-every inbound request for a qits deployment and delegates it to the right component. Read
-`README.md` first; it is the contract document (routing model, configuration reference, security
-posture) and must be updated in the same change that alters any of them.
+every inbound request for a qits deployment, **authenticates it**, and delegates it to the right
+component. Read `README.md` first; it is the contract document (routing model, configuration
+reference, the header contract, security posture) and must be updated in the same change that alters
+any of them.
 
 Key facts that shape every change here:
 
@@ -24,9 +25,10 @@ Key facts that shape every change here:
 
 ```bash
 ./mvnw test                    # unit tests + the end-to-end proxy suite (no docker needed)
-./mvnw package                 # JVM build -> target/quarkus-app/
+./mvnw package -Dqits.variant=oauth   # JVM build -> target/quarkus-app/ (the flag is required)
+./mvnw package -Dqits.variant=local   # the EXPLICITLY UNAUTHENTICATED build; never internet-expose
 ./mvnw quarkus:dev             # dev mode on :8000, fronting a qits on localhost:8080
-./mvnw package -Dnative        # native binary -> target/qits-gateway
+./mvnw package -Dnative -Dqits.variant=oauth   # native binary -> target/qits-gateway
 ./mvnw test -Dtest=RouteTableTest
 
 docker build -t qits/gateway:latest -f docker/Dockerfile .
@@ -46,6 +48,14 @@ src/main/java/eu/wohlben/qits/gateway/
   GatewayRouter.java          the catch-all Vert.x route; one HttpProxy per route
   EdgeHeaders.java            the only rewrites: header hygiene + X-Forwarded-* (verbatim otherwise)
   RouteTableHealthCheck.java  readiness = a non-empty route table
+  AssertedIdentity.java       the identity hand-off from the route handler to EdgeHeaders
+  security/
+    QitsAuthPolicy.java       the one authorization decision (global HttpSecurityPolicy)
+    PublicPaths.java          the token-free allowlist — callers that hold no user token
+    AuthMeRoute.java          GET /api/auth/me, as a raw route (there is no REST layer)
+    NonNavigationRequestChecker.java   499 instead of 302 for SSE/websocket/XHR (oauth only)
+    LocalAuthMechanism.java   the `local` build target's fixed identity (local only)
+    LocalIdentityProvider.java
 ```
 
 Routing is **verbatim** (no path rewriting): a service is reached at `/<segment>/*` and the upstream
@@ -68,6 +78,17 @@ sees that path unchanged. Services are the closed `QitsService` set; a service i
   predicate) on the framework-free value types so it stays unit testable without booting the
   application; `RouteTableTest` and `EdgeHeadersTest` are where those cases belong.
   End-to-end behaviour goes in `GatewayRoutingTest`, which proxies to a real stub upstream.
+- **Authentication terminates here and nowhere else.** Every other component trusts `X-Qits-User`
+  unconditionally, so the strip-then-inject order in `EdgeHeaders` is load-bearing: both halves live
+  in one method precisely so a later edit cannot separate them. Never move the injection into
+  `GatewayRouter` "for clarity" — that is how the forged header wins.
+- **The auth target is a build property, never a runtime key.** `-Dqits.variant=oauth|local` is read
+  at augmentation and baked into the bean set by `@IfBuildProperty`, which is what makes it
+  impossible for an environment variable to open a production gateway. Any change that lets
+  `local` be selected at runtime defeats the whole design and must not land.
+- The suite must keep running **without docker and without network**: no Keycloak Dev Services, no
+  live IdP. `src/test/resources/application.properties` pins a static, never-contacted provider —
+  the tests assert that the gateway challenges and where it points, not that a code flow completes.
 - Add a regression test with every bug fix. Tests are JUnit `*Test.java`.
 - Keep the Quarkus platform version and the JDK release in step with the qits monorepo when it moves
   them (see the README's "Relationship to the qits monorepo").
