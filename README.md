@@ -185,6 +185,25 @@ Authorization is a single global check. `PublicPaths` is the token-free allowlis
 hold no user token by construction (workspace containers doing git/OTLP/MCP, health probes,
 `/api/auth/me`); everything else needs an identity.
 
+The allowlist is grouped by **who serves the path**, because that is what decides when an entry
+expires:
+
+- the gateway's own surface (`/q/*`, `/api/auth/*`, `/api/config.json`) — permanent;
+- the segment-prefixed forms a split-out service serves (`/artifacts/git/*`,
+  `/observability/api/otel/*`, `/ci/api/events/*`, `/workspaces/daemon/*`, `/projects/mcp`, …) —
+  permanent, and identical to the address the service serves on `qits-net` because forwarding is
+  verbatim;
+- the monolith-relative forms (`/git/*`, `/api/otel/*`, `/mcp/*`, …) — **transitional**. They are
+  not aliases: they are the addresses the `/` catch-all's upstream actually serves, and they are
+  deleted in the same change that unsets `qits.gateway.app-host`.
+
+A **service's** `/q/*` is deliberately not public. Each service's non-application root has moved
+under its segment (`/observability/q/openapi`), but nothing that must reach it comes through the
+gateway — container healthchecks and orchestrator probes dial the service directly on `qits-net`.
+What is left at the front door is swagger-ui, the OpenAPI document and deployment detail, which are
+for humans with a session. The gateway's own `/q/*` is public precisely because it is the only
+published listener and its probe has no other address.
+
 ### Build targets
 
 The unauthenticated build has to stay reachable for testing and impossible to switch on by accident,
@@ -233,6 +252,20 @@ unchanged: front the gateway with a forward-auth proxy and have it translate `Re
 | --- | --- |
 | `/q/health/live` | the process is up |
 | `/q/health/ready` | the route table is non-empty — and the response data *is* the route table |
+| `/api/auth/me` | which auth target this build carries, and who is logged in |
+| `/api/config.json` | the web components' identity relay (see below) |
+
+All four are served locally and never proxied, even under a `/` catch-all.
+
+`/api/config.json` is **web-component configuration, not telemetry configuration**, so it lives with
+the thing that serves the web components rather than with qits-observability, which used to own it.
+The browser cannot read environment variables and this process can: a deployment injects
+`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_RESOURCE_ATTRIBUTES`, `OTEL_SERVICE_NAME` and
+`QITS_CAPTURE_ENDPOINT`, and the document relays them as two independently nullable sections —
+`telemetry` (dark without an OTLP endpoint) and `capture` (no capture button without a capture
+endpoint). It is the one gateway path that **cannot** be renamed: `@qits/angular` fetches the
+base-relative `api/config.json` before the application bootstraps, so there is no running app to
+tell about a new address. It takes no segment prefix because the gateway has none.
 
 Readiness deliberately does **not** probe upstreams: an upstream being down is a 502 for that path,
 not a reason to pull the whole front door and take every other component offline with it.

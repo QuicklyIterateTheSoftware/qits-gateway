@@ -49,9 +49,10 @@ src/main/java/eu/wohlben/qits/gateway/
   EdgeHeaders.java            the only rewrites: header hygiene + X-Forwarded-* (verbatim otherwise)
   RouteTableHealthCheck.java  readiness = a non-empty route table
   AssertedIdentity.java       the identity hand-off from the route handler to EdgeHeaders
+  ConfigJsonRoute.java        GET /api/config.json, as a raw route (there is no REST layer)
   security/
     QitsAuthPolicy.java       the one authorization decision (global HttpSecurityPolicy)
-    PublicPaths.java          the token-free allowlist — callers that hold no user token
+    PublicPaths.java          the token-free allowlist — grouped by who serves the path
     AuthMeRoute.java          GET /api/auth/me, as a raw route (there is no REST layer)
     NonNavigationRequestChecker.java   499 instead of 302 for SSE/websocket/XHR (oauth only)
     LocalAuthMechanism.java   the `local` build target's fixed identity (local only)
