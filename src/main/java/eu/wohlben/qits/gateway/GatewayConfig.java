@@ -58,12 +58,18 @@ public interface GatewayConfig {
     boolean enabled();
 
     /**
-     * Request headers the gateway DROPS from every inbound request before forwarding. This is the
-     * gateway's half of the forward-auth trust contract: qits' {@code forwardauth} variant believes
-     * its identity headers unconditionally, so whoever sits in front of it MUST strip
-     * client-supplied copies. Defaults cover the Authelia and oauth2-proxy header names qits
-     * supports. Add to this list, never shrink it below the identity headers your qits build
-     * trusts.
+     * <b>Compatibility</b> request headers the gateway DROPS from every inbound request before
+     * forwarding — the header names a forward-auth proxy vendor chose (Authelia's {@code Remote-*},
+     * oauth2-proxy's {@code X-Auth-Request-*}), which matter when something still fronts the
+     * gateway.
+     *
+     * <p>The gateway's <i>own</i> identity headers are NOT on this list and never need to be: they
+     * live under {@link EdgeHeaders#RESERVED_PREFIX} and are stripped by prefix, structurally,
+     * ahead of this list. That is deliberate — an enumerated list is exactly the wrong shape for
+     * headers we keep adding to.
+     *
+     * <p>Add to this list, never shrink it below the identity headers whatever sits in front of the
+     * gateway injects.
      */
     @WithDefault(
         "Remote-User,Remote-Groups,Remote-Name,Remote-Email,"

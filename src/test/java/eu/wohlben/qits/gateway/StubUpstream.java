@@ -12,6 +12,10 @@ import java.util.Map;
  * A throwaway upstream that echoes back what the gateway forwarded — the request target and the
  * headers that matter for the edge contract — plus the service routes pointing at it.
  *
+ * <p>The {@code x-qits-*} lines are what make the header contract testable from the outside: a
+ * service believes those headers unconditionally, so "what actually arrived here" is the only
+ * assertion worth making about them.
+ *
  * <p>A JDK {@code HttpServer} on an ephemeral port, so the test needs no docker, no fixture and no
  * fixed port. Two real {@link QitsService} segments ({@code artifacts}, {@code observability}) are
  * pointed at the stub via {@code qits.gateway.proxy-hosts.*}; the config is handed to Quarkus at
@@ -39,7 +43,9 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
                       "x-forwarded-for=" + header(exchange, "X-Forwarded-For"),
                       "x-forwarded-host=" + header(exchange, "X-Forwarded-Host"),
                       "x-forwarded-proto=" + header(exchange, "X-Forwarded-Proto"),
-                      "remote-user=" + header(exchange, "Remote-User"))
+                      "remote-user=" + header(exchange, "Remote-User"),
+                      "x-qits-user=" + header(exchange, "X-Qits-User"),
+                      "x-qits-user-id=" + header(exchange, "X-Qits-User-Id"))
                   + "\n";
           byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
           exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");

@@ -139,12 +139,18 @@ exchanges pass through here).
 - **Upstreams come from configuration only.** No request component ever selects a host or port, so
   the gateway cannot be steered into an SSRF. This is the same rule qits' in-process proxies follow
   (they resolve origins exclusively from supervisor state).
-- **Client-supplied identity headers are dropped.** qits' `forwardauth` variant believes headers like
-  `Remote-User` *unconditionally*, on the contract that whatever fronts it strips client copies.
-  Since the gateway is that front door, it honours the contract: `Remote-User`, `Remote-Groups`,
-  `Remote-Name`, `Remote-Email`, `X-Auth-Request-*` and `X-Forwarded-User`/`-Groups` are removed from
-  every inbound request. Extend that list per deployment; **never** shrink it below what the fronted
-  qits build trusts.
+- **`X-Qits-*` is a reserved prefix, stripped unconditionally.** Every header the gateway asserts
+  about a request lives under `X-Qits-`, and the strip rule *is* that prefix — one rule doing both
+  jobs, so it is structurally impossible to introduce a trusted header that is not stripped. An
+  enumerated list would have the wrong failure mode here: adding a trusted header and forgetting to
+  extend the list is a silent, additive mistake that no test naturally catches. Unlike the list
+  below, the prefix is **not configurable** and cannot be shrunk away.
+- **Client-supplied identity headers are dropped.** A forward-auth proxy's headers use the vendor's
+  names rather than ours, so those stay enumerated in
+  `qits.gateway.forwarded.strip-request-headers`: `Remote-User`, `Remote-Groups`, `Remote-Name`,
+  `Remote-Email`, `X-Auth-Request-*` and `X-Forwarded-User`/`-Groups` are removed from every inbound
+  request. This matters when something still fronts the gateway. Extend that list per deployment;
+  **never** shrink it below what whatever sits in front of the gateway injects.
 - **`X-Forwarded-For` is set, not appended** — the gateway is the outermost hop, so any inbound value
   is client-supplied and worthless.
 - **The gateway's own management surface is never proxied.** `/q/*` is served locally even under a

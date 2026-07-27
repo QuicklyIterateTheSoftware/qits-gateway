@@ -51,6 +51,25 @@ class GatewayRoutingTest {
   }
 
   @Test
+  void clientSuppliedReservedHeadersNeverReachAnUpstream() {
+    // The gateway's own namespace: an upstream believes X-Qits-User unconditionally, so a client
+    // setting it through the front door would be a complete authentication bypass. Stripped by
+    // prefix, which is why the casing a client picks cannot matter.
+    given()
+        .header("X-Qits-User", "attacker")
+        .header("x-qits-user-id", "00000000-0000-0000-0000-000000000000")
+        .header("X-QITS-GROUPS", "admin")
+        .when()
+        .get("/artifacts/x")
+        .then()
+        .statusCode(200)
+        .body(containsString("x-qits-user=-"))
+        .body(containsString("x-qits-user-id=-"))
+        .body(not(containsString("attacker")))
+        .body(not(containsString("admin")));
+  }
+
+  @Test
   void unroutedPathsAreAnsweredLocallyWithoutConnectingAnywhere() {
     given()
         .when()

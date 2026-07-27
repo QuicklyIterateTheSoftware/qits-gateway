@@ -57,12 +57,16 @@ sees that path unchanged. Services are the closed `QitsService` set; a service i
 
 - **Security invariant:** upstream host/port come from configuration *only*, never from any part of
   a request. Any change that lets a request influence the target is an SSRF and must not land.
-- **Header hygiene is a contract**, not a nicety: qits' `forwardauth` variant believes identity
-  headers unconditionally. `qits.gateway.forwarded.strip-request-headers` may be extended, never
-  shrunk below the identity headers a fronted qits build trusts.
-- Put edge-case logic (prefix matching, segment validation, host:port parsing) on the framework-free
-  value types so it stays unit testable without booting the application; `RouteTableTest` is where
-  those cases belong.
+- **Header hygiene is a contract**, not a nicety. `X-Qits-*` is the gateway's reserved namespace:
+  everything it asserts about a request lives there, and `EdgeHeaders` strips that prefix
+  unconditionally from every inbound request. Name a new trusted header `X-Qits-…` and it is already
+  stripped; name it anything else and you have opened a bypass. The prefix is not configurable.
+  `qits.gateway.forwarded.strip-request-headers` is the separate compatibility list for a
+  forward-auth proxy's own header names — it may be extended, never shrunk below what a proxy
+  fronting the gateway injects.
+- Put edge-case logic (prefix matching, segment validation, host:port parsing, the reserved-header
+  predicate) on the framework-free value types so it stays unit testable without booting the
+  application; `RouteTableTest` and `EdgeHeadersTest` are where those cases belong.
   End-to-end behaviour goes in `GatewayRoutingTest`, which proxies to a real stub upstream.
 - Add a regression test with every bug fix. Tests are JUnit `*Test.java`.
 - Keep the Quarkus platform version and the JDK release in step with the qits monorepo when it moves
