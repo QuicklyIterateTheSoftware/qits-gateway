@@ -160,6 +160,18 @@ exchanges pass through here).
   **never** shrink it below what whatever sits in front of the gateway injects.
 - **`X-Forwarded-For` is set, not appended** — the gateway is the outermost hop, so any inbound value
   is client-supplied and worthless.
+- **A WebSocket handshake forwards an allow-list, not everything-minus-the-prefix.** Only the RFC
+  6455 handshake headers (`Upgrade`, `Connection`, `Sec-WebSocket-*`, `Host`) plus `Origin` survive;
+  the gateway then asserts `X-Qits-*` and `X-Forwarded-*` on top. Everything else the client sent is
+  dropped, **including `Cookie` and `Authorization`** — authentication terminates here and no
+  upstream authenticates by either, so neither has any business travelling further.
+
+  This needs its own rule because `vertx-http-proxy` short-circuits an upgrade *before* installing
+  its interceptor chain, so the ordinary strip-and-inject never ran on a handshake at all. Until it
+  was fixed, a client-supplied `X-Qits-User` reached the upstream unchanged — a complete
+  authentication bypass through the one door the prefix strip did not cover — and a genuinely
+  authenticated socket arrived anonymous. Both halves are in `EdgeHeaders`, one method each, and
+  `GatewaySocketRoutingTest` is the regression.
 - **The gateway's own management surface is never proxied.** `/q/*` is served locally even under a
   `/` catch-all route.
 - **The gateway is the only thing that authenticates.** It performs the login, decides authorization

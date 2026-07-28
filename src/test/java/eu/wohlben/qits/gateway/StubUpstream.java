@@ -20,10 +20,32 @@ import java.util.Map;
  * fixed port. Two real {@link QitsService} segments ({@code artifacts}, {@code observability}) are
  * pointed at the stub via {@code qits.gateway.proxy-hosts.*}; the config is handed to Quarkus at
  * start, which is the only way the port (known only after binding) can reach the route table.
+ *
+ * <p>A <em>second</em> upstream, on Vert.x, sits behind the {@code projects} segment and does the
+ * same job for WebSocket upgrades: it accepts the handshake and sends back the headers it saw as
+ * its first text frame. It has to be a different server because a JDK {@code HttpServer} cannot
+ * answer an upgrade at all, and it has to exist because the upgrade path through {@code
+ * vertx-http-proxy} carries a completely different header contract from the ordinary one — see
+ * {@code EdgeHeaders.applyToUpgrade}.
  */
 public class StubUpstream implements QuarkusTestResourceLifecycleManager {
 
+  /** The header names the socket upstream reports back, in this order. */
+  static final java.util.List<String> REPORTED_HANDSHAKE_HEADERS =
+      java.util.List.of(
+          "X-Qits-User",
+          "X-Qits-User-Id",
+          "X-Qits-Groups",
+          "Remote-User",
+          "Cookie",
+          "Authorization",
+          "Origin",
+          "X-Forwarded-For",
+          "X-Forwarded-Proto");
+
   private HttpServer server;
+  private io.vertx.core.Vertx socketVertx;
+  private io.vertx.core.http.HttpServer socketServer;
 
   @Override
   public Map<String, String> start() {
@@ -62,7 +84,52 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
     // segments each resolve to their own route.
     config.put("qits.gateway.proxy-hosts.artifacts", "127.0.0.1:" + port);
     config.put("qits.gateway.proxy-hosts.observability", "127.0.0.1:" + port);
+    config.put("qits.gateway.proxy-hosts.projects", "127.0.0.1:" + startSocketUpstream());
     return config;
+  }
+
+  /**
+   * The WebSocket half: accept any upgrade and immediately report what arrived, one {@code
+   * name=value} per line, so a test asserts on "what the upstream actually saw" exactly as the HTTP
+   * stub does. Absent headers report {@code -} rather than being omitted — a missing line and a
+   * missing header would otherwise look the same.
+   */
+  private int startSocketUpstream() {
+    socketVertx = io.vertx.core.Vertx.vertx();
+    try {
+      socketServer =
+          socketVertx
+              .createHttpServer()
+              // A Vert.x server with only a webSocketHandler NPEs on any plain request (it emits a
+              // null task), which surfaces as the client hanging until its own timeout rather than
+              // as anything readable. Answer instead, so "the upgrade did not survive the proxy"
+              // says so.
+              .requestHandler(
+                  req ->
+                      req.response()
+                          .setStatusCode(426)
+                          .putHeader("Content-Type", "text/plain; charset=utf-8")
+                          .end("this upstream only speaks WebSocket; got " + req.method() + "\n"))
+              .webSocketHandler(
+                  socket -> {
+                    StringBuilder seen = new StringBuilder();
+                    for (String name : REPORTED_HANDSHAKE_HEADERS) {
+                      String value = socket.headers().get(name);
+                      seen.append(name.toLowerCase(java.util.Locale.ROOT))
+                          .append('=')
+                          .append(value == null ? "-" : value)
+                          .append('\n');
+                    }
+                    socket.writeTextMessage(seen.toString());
+                  })
+              .listen(0, "127.0.0.1")
+              .toCompletionStage()
+              .toCompletableFuture()
+              .get(10, java.util.concurrent.TimeUnit.SECONDS);
+    } catch (Exception e) {
+      throw new IllegalStateException("Could not start the stub socket upstream", e);
+    }
+    return socketServer.actualPort();
   }
 
   private static String header(com.sun.net.httpserver.HttpExchange exchange, String name) {
@@ -74,6 +141,9 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
   public void stop() {
     if (server != null) {
       server.stop(0);
+    }
+    if (socketVertx != null) {
+      socketVertx.close();
     }
   }
 }

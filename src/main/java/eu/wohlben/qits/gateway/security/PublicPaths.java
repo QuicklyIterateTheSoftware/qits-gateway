@@ -103,11 +103,15 @@ public final class PublicPaths {
         || path.equals("/observability/mcp")
         || path.equals("/projects/mcp")
         // The in-container workspace-daemon's dial-home control socket. A websocket, and the one
-        // socket on this list: how sockets survive the gateway with SameOriginUpgradeCheck still
-        // seeing a real Origin/Host is migration-path-conventions.md §4 item 9, still open, and a
-        // gateway *capability* question rather than anything this allowlist decides. Being public
-        // here is necessary for the daemon (it holds no user token) and not sufficient for the
-        // upgrade to work.
+        // socket on this list; being public here is necessary because a daemon holds no user token.
+        //
+        // This used to say the open question was how a socket survives the gateway with
+        // SameOriginUpgradeCheck still seeing a real Origin/Host. That was wrong twice over. There
+        // is no SameOriginUpgradeCheck in Quarkus 3.34's websockets-next — the class does not
+        // exist — and the real defect was here: vertx-http-proxy skips its interceptor chain
+        // entirely on an upgrade, so EdgeHeaders never ran on a handshake. That is fixed
+        // (EdgeHeaders.applyToUpgrade), and this socket is unaffected either way: the daemon dials
+        // qits-workspaces directly on qits-net and never traverses the gateway at all.
         || path.startsWith("/workspaces/daemon/")
         // Cross-origin capture ingest from a fixture SPA (its own CORS route in the service).
         || path.equals("/workspaces/api/capture");

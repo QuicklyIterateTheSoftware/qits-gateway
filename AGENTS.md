@@ -113,6 +113,24 @@ you can see; a catch-all turns it into someone else's problem.
   unconditionally, so the strip-then-inject order in `EdgeHeaders` is load-bearing: both halves live
   in one method precisely so a later edit cannot separate them. Never move the injection into
   `GatewayRouter` "for clarity" — that is how the forged header wins.
+- **A WebSocket upgrade is a second entry point, and it must stay inside `EdgeHeaders`.**
+  `vertx-http-proxy` short-circuits an upgrade before installing its interceptor chain, so
+  `handleProxyRequest` never runs on a handshake — for a while that meant every socket forwarded the
+  client's `X-Qits-*` verbatim and injected nothing. `EdgeHeaders.applyToUpgrade` is that path;
+  `GatewayRouter` decides *which* entry point applies and performs neither. It forwards an
+  allow-list (`UPGRADE_HEADERS`) rather than stripping a prefix, because a handshake is a protocol
+  negotiation and not a request an upstream answers — so nothing beyond the handshake and what the
+  gateway itself asserts belongs on it, `Cookie` and `Authorization` included. A reserved name can
+  never appear on that list, and `EdgeHeadersTest` asserts exactly that.
+- **`SameOriginUpgradeCheck` does not exist** in the Quarkus this repo builds against, whatever older
+  comments in this repo and its siblings claimed. If you are chasing why a socket fails through the
+  gateway, it is not that.
+- **A WebSocket upgrade only works on the first Quarkus start in a JVM.** After a `@QuarkusTest`
+  restart the upgrade silently degrades to a plain proxied GET, so the handshake fails with nothing
+  logged anywhere. It reproduces with all of the gateway's own header work removed, so it is the
+  test harness rather than this code, and a deployed gateway starts once. That is the entire reason
+  `GatewaySocketRoutingTest` runs in its own surefire execution — do not fold it back into the main
+  one to tidy the pom.
 - **The auth target is a build property, never a runtime key.** `-Dqits.variant=oauth|local` is read
   at augmentation and baked into the bean set by `@IfBuildProperty`, which is what makes it
   impossible for an environment variable to open a production gateway. Any change that lets

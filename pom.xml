@@ -143,6 +143,42 @@
                         <maven.home>${maven.home}</maven.home>
                     </systemPropertyVariables>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>default-test</id>
+                        <configuration>
+                            <excludes>
+                                <exclude>**/GatewaySocketRoutingTest.java</exclude>
+                            </excludes>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- The WebSocket routing tests, in a JVM of their own.
+
+                             They need it, and the reason is worth writing down because it looks
+                             like flakiness and is not: a WebSocket upgrade through
+                             vertx-http-proxy only works on the FIRST Quarkus start in a JVM. Once
+                             a @QuarkusTest with a different profile has forced a restart, the
+                             upgrade silently degrades to a plain proxied GET — the upstream sees
+                             an ordinary request and answers it, so the symptom is a handshake
+                             failure with no error anywhere. Reproduced with the gateway's own
+                             header work removed, so it is the harness rather than anything here;
+                             a deployed gateway starts once and is unaffected.
+
+                             A second surefire execution forks a second JVM, which is the whole
+                             mechanism: in it, this class's application is the first start. -->
+                        <id>websocket-tests</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                        <configuration>
+                            <includes>
+                                <include>**/GatewaySocketRoutingTest.java</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <artifactId>maven-failsafe-plugin</artifactId>

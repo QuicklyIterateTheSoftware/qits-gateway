@@ -71,10 +71,16 @@ public class GatewayRouter {
 
   private HttpClient client;
 
+  /**
+   * Held rather than scoped to {@link #init} because a WebSocket upgrade never reaches the
+   * interceptor chain — see {@link EdgeHeaders#applyToUpgrade}. This handler has to invoke it.
+   */
+  private EdgeHeaders edgeHeaders;
+
   void init(@Observes Router router) {
     client = vertx.createHttpClient(new HttpClientOptions().setKeepAlive(true));
     // Nothing the interceptor does is route-specific (verbatim forwarding), so one is shared.
-    EdgeHeaders edgeHeaders = new EdgeHeaders(config.forwarded());
+    edgeHeaders = new EdgeHeaders(config.forwarded());
     for (GatewayRoute route : routeTable.routes()) {
       proxies.put(
           route.name(),
@@ -117,6 +123,12 @@ public class GatewayRouter {
     // RoutingContext, so hand it over before the proxy takes the request.
     AssertedIdentity.record(
         rc.user() instanceof QuarkusHttpUser user ? user.getSecurityIdentity() : null);
+    // A WebSocket upgrade bypasses the interceptor chain inside vertx-http-proxy, so the header
+    // contract has to be applied to the inbound request before the proxy takes it. EdgeHeaders
+    // still owns both halves of it; this only decides which of its two entry points applies.
+    if (EdgeHeaders.isWebSocketUpgrade(rc.request())) {
+      edgeHeaders.applyToUpgrade(rc.request());
+    }
     proxies.get(route.get().name()).handle(rc.request());
   }
 }
