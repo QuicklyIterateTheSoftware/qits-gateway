@@ -34,8 +34,16 @@ COPY mvnw .
 COPY .mvn/ .mvn/
 RUN ./mvnw --version
 
-COPY pom.xml .
-COPY src/ src/
+# The whole tree, not a file list. `COPY pom.xml .` + `COPY src/ src/` only worked as long as the
+# repo had exactly those two things the build reads: the day it gains another top-level entry the
+# build needs — a second module, a config dir, a resource tree the native stage wants — the file
+# list silently omits it and this Dockerfile has to be edited in lockstep. Nothing enforces that,
+# and the failure lands far from the cause (a missing file inside a native-image run, or worse, a
+# green build of the wrong thing). Copying everything makes new top-level content free.
+# `.dockerignore` is what keeps this cheap — without it this line drags in target/, ~86 MB of
+# build output that would also risk shadowing what this stage compiles.
+COPY . .
+
 # oauth | local — see the header. No ENV default: an unset value fails the enforcer rather than
 # silently picking a target.
 ARG QITS_VARIANT
