@@ -229,7 +229,9 @@ targets — a single-module build cannot conditionally drop a compile dependency
 conditions the beans rather than the jar. The extension itself *is* switched off in the `local`
 target, which is what lets that build start with no IdP configured; what it cannot shed is the jar.
 
-Measured (`-Dquarkus.native.container-build=true`, same machine, same day):
+Measured with `-Dquarkus.native.container-build=true` (same machine, same day) — pinned to the
+container builder so the three rows share one native-image version, not because a container is
+needed to build:
 
 | Build | Native binary | vs. before |
 | --- | --- | --- |
@@ -272,28 +274,40 @@ not a reason to pull the whole front door and take every other component offline
 
 ## Build & run
 
-Requires **JDK 25** (`.sdkmanrc` pins it) — google-java-format, applied automatically by Spotless on
-every build, needs JDK 21+. The native build needs a GraalVM/Mandrel `native-image` for JDK 25 on
-`GRAALVM_HOME` or `PATH`; qits' workspace image ships one at `/usr/lib/jvm/mandrel-25`, so `-Dnative`
-works out of the box inside a workspace container or the devcontainer.
+`.sdkmanrc` pins **`25.0.2-graalce`** — a JDK 25 (Spotless' google-java-format needs 21+) that also
+carries `native-image`, so `sdk env` is the whole toolchain and `-Dnative` compiles in-process with
+**no container involved**. Nothing else has to be installed and `GRAALVM_HOME` should stay unset.
+
+> **If `native-image` is missing, the build does not fail.** Quarkus logs `Cannot find the
+> native-image in the GRAALVM_HOME, JAVA_HOME and System PATH. Attempting to fall back to container
+> build`, pulls a 1.8 GB Mandrel image and compiles under docker. Green either way — which is why
+> the toolchain is declared rather than assumed. The fallback still works and is what a CI runner
+> without a GraalVM gets; recognise it by the image pull when a ~40 s build starts downloading a
+> container.
+
+Packaging additionally requires naming an [auth target](#build-targets) — `-Dqits.variant=` is
+enforced from `prepare-package` on, so `test` and `quarkus:dev` run flagless but nothing that
+produces an artifact does.
 
 ```bash
 # Tests (unit + an end-to-end proxy suite against a stub upstream; no docker needed)
 ./mvnw test
 
 # JVM build, then run
-./mvnw package
+./mvnw package -Dqits.variant=oauth
 java -jar target/quarkus-app/quarkus-run.jar
 
 # Dev mode (live reload). Defaults to fronting a qits on localhost:8080 and listens on :8000,
 # so it does not collide with the qits it is proxying.
 ./mvnw quarkus:dev
 
-# Native binary -> target/qits-gateway
-./mvnw package -Dnative
+# Native binary -> target/qits-gateway (~40 s, no docker)
+./mvnw package -Dnative -Dqits.variant=oauth
+./target/qits-gateway
 
-# Native container image (self-contained: compiles inside the build)
-docker build -t qits/gateway:latest -f docker/Dockerfile .
+# Native container image. This is how the binary is SHIPPED, not how it is built: the stage brings
+# its own Mandrel builder, which is also the escape hatch on a machine with no GraalVM.
+docker build -t qits/gateway:latest --build-arg QITS_VARIANT=oauth -f docker/Dockerfile .
 ```
 
 Point it at something without touching a file:

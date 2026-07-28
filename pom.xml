@@ -155,7 +155,14 @@
                         </goals>
                         <configuration>
                             <systemPropertyVariables>
-                                <native.image.path>${project.build.directory}/${project.build.finalName}-runner</native.image.path>
+                                <!-- Where @QuarkusIntegrationTest looks for the compiled binary in a
+                                     `-Dnative` build. It is spelled `qits-gateway` and NOT
+                                     ${project.build.finalName}-runner, because application.properties
+                                     sets quarkus.package.output-name=qits-gateway with
+                                     jar.add-runner-suffix=false — the -runner path does not exist and
+                                     a native IT would launch nothing while the build stayed green.
+                                     The name lives in two files; they move together. -->
+                                <native.image.path>${project.build.directory}/qits-gateway</native.image.path>
                                 <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
                                 <maven.home>${maven.home}</maven.home>
                             </systemPropertyVariables>
@@ -252,7 +259,21 @@ See migration-auth-plan.md §5.</regexMessage>
 
         <!-- GraalVM native build (mirrors qits' workspace-daemon): `-Dnative` disables the jar and
              enables the native image. There is no parent pom to inherit a native profile from, so it
-             lives here. docker/Dockerfile's `build` stage runs `package -Dnative`. -->
+             lives here.
+
+             The toolchain is `.sdkmanrc`'s 25.0.2-graalce and nothing else: `sdk env` puts a
+             native-image on JAVA_HOME and the compile runs in-process, no container. That has to be
+             declared rather than assumed, because Quarkus does not fail when native-image is
+             missing — it logs "Cannot find the native-image ... Attempting to fall back to container
+             build" and shells docker with a 1.8 GB Mandrel image. Green either way, which is exactly
+             how a repo ends up building under docker without anyone deciding to. The fallback stays
+             working (it is what a GraalVM-less CI gets); it is just not the path this repo names.
+
+             skipITs flips with the profile so a native build runs @QuarkusIntegrationTest against
+             the binary rather than skipping past it — see failsafe's native.image.path above.
+
+             docker/Dockerfile is the shipping form, not the build: it wraps this same binary in an
+             image (with its own Mandrel builder, so a machine without a GraalVM can produce one). -->
         <profile>
             <id>native</id>
             <activation>

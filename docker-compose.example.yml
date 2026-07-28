@@ -12,6 +12,10 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
+      args:
+        # The auth target is fixed at build time and the Dockerfile has no default — an image has to
+        # name whether it authenticates. `local` is EXPLICITLY UNAUTHENTICATED; never publish one.
+        QITS_VARIANT: "oauth"
     ports:
       # The single public port of the whole deployment.
       - "8080:8080"

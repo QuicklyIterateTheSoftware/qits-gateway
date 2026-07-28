@@ -15,8 +15,19 @@ Key facts that shape every change here:
 - **Separately deployable, parent-less build.** This repo is a git submodule of the qits monorepo
   but is *not* a module of its Maven reactor. A clone of this repo alone must build. Never add a
   `<parent>` or a dependency on a qits module.
-- **Compiles to a GraalVM native binary.** Every added extension costs image size, build time and
-  reflection surface. Keep the dependency set minimal; prefer raw Vert.x routes over a REST layer.
+- **Compiles to a GraalVM native binary, locally and without docker.** `.sdkmanrc` names
+  `25.0.2-graalce`, so `sdk env` gives you a `native-image` and `./mvnw package -Dnative
+  -Dqits.variant=…` produces `target/qits-gateway` in about 40 seconds. Two consequences:
+  - **A missing GraalVM does not fail the build.** Quarkus logs `Cannot find the native-image ...
+    Attempting to fall back to container build` and shells docker with a 1.8 GB Mandrel image. Green
+    either way, so the fallback is easy to be in without noticing — recognise it by the image pull.
+    Leave it working (it is what a GraalVM-less CI gets), but it is not the declared path.
+  - **Every added extension costs image size, build time and reflection surface**, and a missing
+    reflection/proxy/`ServiceLoader`/resource registration fails at *runtime in the binary* while
+    the JVM suite stays green. Keep the dependency set minimal; prefer raw Vert.x routes over a REST
+    layer. If a native build needs configuration to pass, that configuration is part of the change.
+  - `docker/Dockerfile` is the **shipping** form — it wraps this binary in an image (and, because
+    its builder stage carries its own Mandrel, is the escape hatch on a machine with no GraalVM).
 - **Stateless.** No database, no ORM, no session state. Route resolution reads configuration only.
 - **Streaming.** Never buffer request or response bodies — SSE, git smart-HTTP, WebSocket upgrades
   and large artifact uploads all pass through here.
@@ -28,14 +39,26 @@ Key facts that shape every change here:
 ./mvnw package -Dqits.variant=oauth   # JVM build -> target/quarkus-app/ (the flag is required)
 ./mvnw package -Dqits.variant=local   # the EXPLICITLY UNAUTHENTICATED build; never internet-expose
 ./mvnw quarkus:dev             # dev mode on :8000, fronting a qits on localhost:8080
-./mvnw package -Dnative -Dqits.variant=oauth   # native binary -> target/qits-gateway
+./mvnw package -Dnative -Dqits.variant=oauth   # native binary -> target/qits-gateway (no docker)
 ./mvnw test -Dtest=RouteTableTest
 
-docker build -t qits/gateway:latest -f docker/Dockerfile .
+docker build -t qits/gateway:latest --build-arg QITS_VARIANT=oauth -f docker/Dockerfile .
 ```
 
+The `--build-arg` has no default, deliberately: an image is a shipped gateway, and the
+`require-auth-variant` enforcer rule exists so a shipped gateway always said out loud whether it
+authenticates.
+
+**`-Dqits.variant` is a packaging flag, not a test flag.** `verify -Dqits.variant=local` does not run
+"the suite against the local target" — it re-augments *every* `@QuarkusTest` into the open target, and
+`GatewayAuthTest` (which asserts the oauth challenge) then fails against a build that has no
+challenge to make. `local` is covered by `LocalVariantTest`'s `@TestProfile`, which flips the same two
+build properties for one class. Use `-Dqits.variant=oauth` for a full `verify`; the enforcer is bound
+to `prepare-package` precisely so everything before it runs flagless.
+
 Spotless (google-java-format) runs automatically at `process-sources`, so formatting is never a
-review topic — but it needs JDK 21+; build on the JDK 25 that `.sdkmanrc` pins.
+review topic — but it needs JDK 21+; `.sdkmanrc`'s `25.0.2-graalce` covers both that and the native
+build.
 
 ## Layout
 
