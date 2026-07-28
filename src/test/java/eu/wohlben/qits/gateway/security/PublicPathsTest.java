@@ -14,8 +14,10 @@ import org.junit.jupiter.api.Test;
  * equals}. An entry with no test is an entry that can be silently deleted later, so every line of
  * {@link PublicPaths} is named here at least once.
  *
- * <p>The nesting mirrors {@link PublicPaths}' three groups, and {@link OnTheMonolith} exists to be
- * deleted in one piece together with the method it covers, when {@code qits.gateway.app-host} goes.
+ * <p>The nesting mirrors {@link PublicPaths}' two groups. It had a third, {@code OnTheMonolith},
+ * covering the monolith-relative spellings the {@code /} catch-all carried; both are gone — qits
+ * deploys clean, with no monolith beside these services, so those paths name no upstream and are
+ * simply not public any more. The cases below now assert exactly that.
  */
 class PublicPathsTest {
 
@@ -146,47 +148,43 @@ class PublicPathsTest {
   }
 
   /**
-   * Transitional, and covered so it cannot be dropped by accident before its time: these are the
-   * spellings the {@code /} catch-all still carries. Delete this class together with {@code
-   * PublicPaths.onTheMonolith} when {@code qits.gateway.app-host} goes.
+   * The monolith-relative spellings, which used to be public because the {@code /} catch-all served
+   * them. Asserted PROTECTED rather than simply deleted: dropping the old cases would have left
+   * nothing saying what happened, and these paths are exactly the ones a stale container or an old
+   * bookmark would still dial. There is no upstream behind them now, so the gateway challenges them
+   * — and if someone re-adds a catch-all, this is what fails.
    */
   @Nested
-  class OnTheMonolith {
+  class TheRetiredMonolithSpellings {
 
     @Test
-    void containerFacingPathsArePublic() {
-      assertTrue(PublicPaths.isPublic("/git/abc-123/info/refs"));
-      assertTrue(PublicPaths.isPublic("/mcp"));
-      assertTrue(PublicPaths.isPublic("/mcp/repository"));
-      assertTrue(PublicPaths.isPublic("/mcp/actions"));
-      assertTrue(PublicPaths.isPublic("/api/workspace-daemon/w1"));
-      assertTrue(PublicPaths.isPublic("/api/otel/v1/traces"));
-      assertTrue(PublicPaths.isPublic("/api/otel/v1/logs"));
-      assertFalse(PublicPaths.isPublic("/git")); // only the subtree is public, not the bare path
+    void containerFacingPathsAreNoLongerPublic() {
+      assertFalse(PublicPaths.isPublic("/git/abc-123/info/refs"));
+      assertFalse(PublicPaths.isPublic("/mcp"));
+      assertFalse(PublicPaths.isPublic("/mcp/repository"));
+      assertFalse(PublicPaths.isPublic("/api/workspace-daemon/w1"));
+      assertFalse(PublicPaths.isPublic("/api/otel/v1/traces"));
+      assertFalse(PublicPaths.isPublic("/api/capture"));
     }
 
     @Test
-    void captureIsPublicExactlyNotAsPrefix() {
-      assertTrue(PublicPaths.isPublic("/api/capture"));
-      assertFalse(PublicPaths.isPublic("/api/captures"));
-      assertFalse(PublicPaths.isPublic("/api/capture/extra"));
+    void theOldArtifactAndCiSpellingsAreNoLongerPublic() {
+      assertFalse(PublicPaths.isPublic("/api/artifacts"));
+      assertFalse(PublicPaths.isPublic("/api/artifacts/repositories/ci-screenshots/blobs"));
+      assertFalse(PublicPaths.isPublic("/api/ci/events/post-receive"));
     }
 
+    /** The segment-prefixed forms are the live ones, and stay public. */
     @Test
-    void artifactsBlobStoreIsPublic() {
-      assertTrue(PublicPaths.isPublic("/api/artifacts"));
-      assertTrue(PublicPaths.isPublic("/api/artifacts/repositories/ci-screenshots/blobs"));
-      assertFalse(PublicPaths.isPublic("/api/artifactories")); // prefix must not bleed
-    }
-
-    @Test
-    void onlyTheCiEventIntakeIsPublic() {
-      assertTrue(PublicPaths.isPublic("/api/ci/events/post-receive"));
-      assertFalse(PublicPaths.isPublic("/api/ci/repositories/r1/runs"));
-      assertFalse(PublicPaths.isPublic("/api/ci/runs/run-1"));
-      assertFalse(PublicPaths.isPublic("/api/ci"));
-      assertFalse(PublicPaths.isPublic("/api/ci/events")); // only the subtree, not the bare path
-      assertFalse(PublicPaths.isPublic("/api/cinema")); // prefix must not bleed
+    void theSegmentPrefixedFormsStillAre() {
+      assertTrue(PublicPaths.isPublic("/artifacts/git/abc-123/info/refs"));
+      assertTrue(PublicPaths.isPublic("/artifacts/api/repositories/ci-screenshots/blobs"));
+      assertTrue(PublicPaths.isPublic("/observability/api/otel/v1/traces"));
+      assertTrue(PublicPaths.isPublic("/observability/mcp"));
+      assertTrue(PublicPaths.isPublic("/projects/mcp"));
+      assertTrue(PublicPaths.isPublic("/workspaces/daemon/w1"));
+      assertTrue(PublicPaths.isPublic("/workspaces/api/capture"));
+      assertTrue(PublicPaths.isPublic("/ci/api/events/post-receive"));
     }
   }
 

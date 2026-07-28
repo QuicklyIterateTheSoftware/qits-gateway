@@ -84,8 +84,15 @@ src/main/java/eu/wohlben/qits/gateway/
 
 Routing is **verbatim** (no path rewriting): a service is reached at `/<segment>/*` and the upstream
 sees that path unchanged. Services are the closed `QitsService` set; a service is live only when a
-`qits.gateway.proxy-hosts.<segment>` entry names its host. The `/` catch-all is the qits monolith
-(`qits.gateway.app-host`). Add a service by extending the enum, not by inventing a config key.
+`qits.gateway.proxy-hosts.<segment>` entry names its host. Add a service by extending the enum, not
+by inventing a config key.
+
+**There is no catch-all, and do not reintroduce one.** `/` used to route to the qits monolith via
+`qits.gateway.app-host`; qits deploys clean now, with no monolith beside these services and no
+shared state between them, so nothing is entitled to every unclaimed path. `GatewayRoute` rejects an
+empty prefix outright rather than normalising it back into one, because a config value that lost its
+content would otherwise turn a service route into a catch-all silently. An unrouted path is a 404
+you can see; a catch-all turns it into someone else's problem.
 
 ## Conventions
 

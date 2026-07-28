@@ -93,10 +93,7 @@ public class GatewayRouter {
     routeTable
         .routes()
         .forEach(
-            r ->
-                LOG.infof(
-                    "route %-14s %-16s -> %s",
-                    r.name(), r.isCatchAll() ? "/*" : r.prefix() + "/*", r.upstream()));
+            r -> LOG.infof("route %-14s %-16s -> %s", r.name(), r.prefix() + "/*", r.upstream()));
   }
 
   private void handle(RoutingContext rc) {

@@ -11,12 +11,16 @@ import java.util.Optional;
 /**
  * The gateway's single source of truth for "which component owns this path". It is built from the
  * {@link QitsService} registry: each {@code qits.gateway.proxy-hosts.<segment>} entry becomes a
- * route to that service, and the optional {@code qits.gateway.app-host} becomes the catch-all to
- * the qits monolith.
+ * route to that service, and nothing else becomes anything.
  *
- * <p>Resolution is <b>longest prefix wins</b>: {@code /artifacts} beats the {@code /} catch-all,
- * regardless of declaration order, so adding a service never depends on where it lands in a
- * properties file.
+ * <p><b>There is no catch-all.</b> A path no route claims is a 404 here, not a forward to some
+ * default upstream. That used to be the qits monolith, which this deployment does not have and will
+ * not run beside: qits is deployed clean, as these services and nothing else. An unrouted path is
+ * therefore a configuration gap, and answering 404 is what makes it visible instead of quietly
+ * shipping every unmatched request somewhere.
+ *
+ * <p>Resolution is <b>longest prefix wins</b>, regardless of declaration order, so adding a service
+ * never depends on where it lands in a properties file.
  */
 @ApplicationScoped
 public class RouteTable {
@@ -28,7 +32,7 @@ public class RouteTable {
 
   @Inject
   public RouteTable(GatewayConfig config) {
-    this(buildRoutes(config.appHost(), config.appPort(), config.proxyHosts()));
+    this(buildRoutes(config.proxyHosts()));
   }
 
   private RouteTable(List<GatewayRoute> routes) {
@@ -59,8 +63,7 @@ public class RouteTable {
    * @throws IllegalArgumentException if a {@code proxy-hosts} key is not a known service, or its
    *     value has no host
    */
-  static List<GatewayRoute> buildRoutes(
-      Optional<String> appHost, int appPort, Map<String, String> proxyHosts) {
+  static List<GatewayRoute> buildRoutes(Map<String, String> proxyHosts) {
     List<GatewayRoute> resolved = new ArrayList<>();
     for (Map.Entry<String, String> entry : proxyHosts.entrySet()) {
       QitsService service =
@@ -74,7 +77,6 @@ public class RouteTable {
                               + QitsService.knownSegments()));
       resolved.add(toServiceRoute(service, entry.getValue()));
     }
-    appHost.ifPresent(host -> resolved.add(GatewayRoute.catchAll(host, appPort)));
     return resolved;
   }
 

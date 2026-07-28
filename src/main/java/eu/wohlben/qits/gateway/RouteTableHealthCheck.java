@@ -26,9 +26,7 @@ public class RouteTableHealthCheck implements HealthCheck {
   public HealthCheckResponse call() {
     HealthCheckResponseBuilder response =
         HealthCheckResponse.named("gateway-routes").status(!routeTable.isEmpty());
-    routeTable
-        .routes()
-        .forEach(r -> response.withData(r.isCatchAll() ? "/" : r.prefix(), r.upstream()));
+    routeTable.routes().forEach(r -> response.withData(r.prefix(), r.upstream()));
     return response.build();
   }
 }

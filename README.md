@@ -69,11 +69,11 @@ protocol, dev-server HMR sockets and large artifact uploads working through the 
 The set of services the gateway can front is a **named registry** — the `QitsService` enum. A
 service's public identity drops the `qits-` prefix, so `qits-artifacts` is reached at `/artifacts/*`
 and forwarded to the `qits-artifacts` container. Which services are *live* is a deployment decision
-(see [Configuration](#configuration)); everything they do not claim falls through to the qits
-monolith.
+(see [Configuration](#configuration)); everything they do not claim is a 404 from the gateway
+itself.
 
-**Resolution is longest-prefix-wins**, regardless of declaration order: `/artifacts` beats the `/`
-catch-all. Matching is **segment-aware** — `/art` never captures `/artifacts/…`, and `/ci` never
+**Resolution is longest-prefix-wins**, regardless of declaration order, so adding a service never
+depends on where its line lands in a properties file. Matching is **segment-aware** — `/art` never captures `/artifacts/…`, and `/ci` never
 captures `/cicd/…`. A path no route claims (and no live service) is answered with **404 by the
 gateway itself**; it opens no connection.
 
@@ -84,12 +84,17 @@ serve and nothing breaks apps that emit absolute-root asset URLs.
 ## Configuration
 
 Everything is MicroProfile config, so any key works as a property, a system property or an
-environment variable. The **catch-all** (the qits monolith):
+environment variable.
 
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `qits.gateway.app-host` | — | qits monolith DNS name; unset ⇒ no catch-all (unclaimed paths 404) |
-| `qits.gateway.app-port` | `8080` | qits monolith port |
+**There is no catch-all.** A path no service claims is answered 404 by the gateway itself. It used
+to fall through to the qits monolith (`qits.gateway.app-host`), so the split could run beside it and
+take paths over one at a time; qits is deployed clean now — these services and nothing else, sharing
+no database, volume or session with a monolith — so there is no upstream entitled to "everything
+else", and both that key and the route it built are gone.
+
+A consequence worth knowing: a gateway with no `proxy-hosts` entries routes nothing and reports
+**not ready** (`/q/health/ready`). That is the intended signal, and it is why nothing is enabled by
+default — see the registry below.
 
 The **service registry** — one entry per live split-out service, keyed by its public segment:
 
@@ -128,9 +133,11 @@ Edge headers:
 | `qits.gateway.forwarded.enabled` | `true` | emit `X-Forwarded-For`/`-Proto`/`-Host`/`-Port` |
 | `qits.gateway.forwarded.strip-request-headers` | the identity headers below | request headers dropped from every inbound request |
 
-The shipped `application.properties` defaults to today's topology — the `/` catch-all to `qits:8080`
-— and carries the whole enum as commented `proxy-hosts` lines, ready to uncomment as each service
-goes live. Other settings worth knowing: `quarkus.http.limits.max-body-size` (must be ≥ the largest
+The shipped `application.properties` enables **nothing**: it carries the whole enum as commented
+`proxy-hosts` lines and leaves naming the table to the deployment. That is not laziness — a `Map`
+entry cannot be unset by a later config source, only overridden, so an entry shipped here is one no
+deployment and no test could take away, and "run five of the six" would become inexpressible. Other
+settings worth knowing: `quarkus.http.limits.max-body-size` (must be ≥ the largest
 upload any fronted component accepts) and `quarkus.http.idle-timeout=1H` (long-lived SSE/HMR/git
 exchanges pass through here).
 
@@ -193,9 +200,11 @@ expires:
   `/observability/api/otel/*`, `/ci/api/events/*`, `/workspaces/daemon/*`, `/projects/mcp`, …) —
   permanent, and identical to the address the service serves on `qits-net` because forwarding is
   verbatim;
-- the monolith-relative forms (`/git/*`, `/api/otel/*`, `/mcp/*`, …) — **transitional**. They are
-  not aliases: they are the addresses the `/` catch-all's upstream actually serves, and they are
-  deleted in the same change that unsets `qits.gateway.app-host`.
+There used to be a third group: the monolith-relative forms (`/git/*`, `/api/otel/*`, `/mcp/*`, …),
+which were public because the `/` catch-all's upstream served them. They went with the catch-all.
+Those paths now name no upstream, so they are neither routed nor public — `PublicPathsTest` asserts
+they are *protected*, rather than simply dropping the cases, so a re-added catch-all fails a test
+instead of silently reopening an anonymous surface.
 
 A **service's** `/q/*` is deliberately not public. Each service's non-application root has moved
 under its segment (`/observability/q/openapi`), but nothing that must reach it comes through the
@@ -313,8 +322,8 @@ docker build -t qits/gateway:latest --build-arg QITS_VARIANT=oauth -f docker/Doc
 Point it at something without touching a file:
 
 ```bash
-./mvnw quarkus:dev -Dqits.gateway.app-host=localhost \
-                   -Dqits.gateway.proxy-hosts.artifacts=127.0.0.1:9000
+./mvnw quarkus:dev -Dqits.gateway.proxy-hosts.artifacts=127.0.0.1:9000 \
+                   -Dqits.gateway.proxy-hosts.projects=localhost:8090
 ```
 
 ## Deployment

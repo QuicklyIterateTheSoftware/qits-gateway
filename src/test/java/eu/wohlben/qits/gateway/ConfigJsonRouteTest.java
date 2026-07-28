@@ -10,11 +10,10 @@ import org.junit.jupiter.api.Test;
 /**
  * The unconfigured (standalone, not-managed) case: both relay sections report dark.
  *
- * <p>The 200 is itself an assertion about routing. The suite runs with no catch-all at all ({@code
- * qits.gateway.app-host=} in the test config), so if {@link ConfigJsonRoute} did not claim this
- * path ahead of {@code GatewayRouter}, the answer would be the gateway's own 404 — and in a
- * deployment that does have a catch-all, it would be silently forwarded to the monolith instead of
- * served here.
+ * <p>The 200 is itself an assertion about routing. Nothing claims {@code /} any more — the monolith
+ * catch-all is gone — so if {@link ConfigJsonRoute} did not claim this path ahead of {@code
+ * GatewayRouter}, the answer would be the gateway's own 404. That it is served here at all is the
+ * point: {@code /api/config.json} belongs to the gateway itself, not to any segment.
  *
  * <p>No {@code @TestSecurity}: the path is on {@code PublicPaths}, because {@code @qits/angular}
  * fetches it pre-bootstrap with no session. Reaching a 200 anonymously is part of the contract.

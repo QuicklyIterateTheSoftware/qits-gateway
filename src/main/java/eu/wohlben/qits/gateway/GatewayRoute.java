@@ -9,9 +9,8 @@ package eu.wohlben.qits.gateway;
  * and the {@code host[:port]} parsing — the parts with actual edge cases — are unit-testable
  * without booting an application (see {@code RouteTableTest}).
  *
- * @param name the service segment (or {@code "qits"} for the catch-all); used in logs and health
- * @param prefix the normalised prefix: no trailing slash, and {@code ""} for the catch-all {@code
- *     /}
+ * @param name the service segment; used in logs and the health check
+ * @param prefix the normalised prefix: leading slash, no trailing slash
  * @param host upstream hostname (config only, never request-derived)
  * @param port upstream port
  */
@@ -26,14 +25,14 @@ public record GatewayRoute(String name, String prefix, String host, int port) {
     return new GatewayRoute(service.segment(), service.pathPrefix(), host, port);
   }
 
-  /** The catch-all route to the qits monolith: claims {@code /}, matches everything unclaimed. */
-  public static GatewayRoute catchAll(String host, int port) {
-    return new GatewayRoute("qits", "/", host, port);
-  }
-
   /**
-   * {@code /} ⇒ {@code ""} (matches everything), otherwise a leading slash is enforced and a
-   * trailing one dropped, so {@code /artifacts/} and {@code artifacts} are the same route.
+   * A leading slash is enforced and a trailing one dropped, so {@code /artifacts/} and {@code
+   * artifacts} are the same route.
+   *
+   * <p>An empty prefix is rejected rather than normalised. It used to mean the {@code /} catch-all
+   * to the monolith; with that gone there is no upstream entitled to every unclaimed path, and
+   * silently reviving one from a blank config value is exactly how a gateway starts forwarding
+   * traffic nobody routed.
    */
   static String normalisePrefix(String raw) {
     String p = raw == null ? "" : raw.trim();
@@ -43,23 +42,21 @@ public record GatewayRoute(String name, String prefix, String host, int port) {
     while (p.length() > 1 && p.endsWith("/")) {
       p = p.substring(0, p.length() - 1);
     }
-    return p.equals("/") ? "" : p;
-  }
-
-  /** True for the {@code /} entry, which claims every path no other route claims. */
-  public boolean isCatchAll() {
-    return prefix.isEmpty();
+    if (p.equals("/")) {
+      throw new IllegalArgumentException(
+          "A gateway route must claim a path prefix; '/' would be a catch-all, and there is no"
+              + " longer an upstream that serves every unclaimed path.");
+    }
+    return p;
   }
 
   /**
    * Segment-aware prefix match: {@code /ci} must NOT capture {@code /cicd/x}, or a route table
    * would silently hijack a sibling's traffic. The prefix itself ({@code /artifacts}) and
-   * everything under it ({@code /artifacts/…}) match.
+   * everything under it ({@code /artifacts/…}) match. Nothing matches a path no route claims — the
+   * gateway answers 404 rather than guessing.
    */
   public boolean matches(String path) {
-    if (isCatchAll()) {
-      return true;
-    }
     return path.equals(prefix) || path.startsWith(prefix + "/");
   }
 

@@ -11,42 +11,24 @@ package eu.wohlben.qits.gateway.security;
  * containers reach their targets directly on {@code qits-net}; wherever the gateway <em>is</em> in
  * their path, it must not demand an identity they have no way to hold.
  *
- * <h2>Three groups, and why they are separate methods</h2>
+ * <h2>Two groups, and why they are separate methods</h2>
  *
  * <ul>
- *   <li>{@link #gatewaysOwn} — served by this process. Permanent.
+ *   <li>{@link #gatewaysOwn} — served by this process.
  *   <li>{@link #onAService} — served by a split-out service under its own {@code /<segment>/…}
- *       prefix, per {@code migration-path-conventions.md}. Permanent.
- *   <li>{@link #onTheMonolith} — the monolith-relative spellings of the same capabilities.
- *       <b>Transitional.</b>
+ *       prefix.
  * </ul>
  *
- * <p><b>The old spellings stay, for exactly as long as the catch-all does.</b> This was the open
- * question the previous version of this javadoc left; here is the answer and the reasoning, because
- * "why are there two of everything" is invisible six months later.
+ * <p>There was a third, {@code onTheMonolith}: the monolith-relative spellings ({@code /git/},
+ * {@code /api/otel/}, {@code /mcp/}) that the {@code /} catch-all carried. It is gone with the
+ * catch-all itself. qits is deployed clean — these services and nothing else, no monolith beside
+ * them and no shared access — so those paths name an upstream that does not exist, and the gateway
+ * now 404s them rather than allowing them through to nothing.
  *
- * <p>The two groups are not two spellings of one route. They are <em>two upstreams</em>. {@code
- * /api/otel/} is the correct, and only, address of OTLP ingest on the qits monolith, which {@code
- * qits.gateway.app-host} still routes to and which still serves it; {@code
- * /observability/api/otel/} is the correct, and only, address of OTLP ingest on qits-observability.
- * Both entries describe live code. Deleting the monolith group today would not remove a legacy
- * alias — it would make the gateway challenge a container calling the one upstream the shipped
- * configuration actually names, since every {@code proxy-hosts} entry is still commented out.
- * Keeping it costs a second block of entries and nothing else: a monolith-relative path can only
- * ever reach the monolith, because the segment prefixes claim their subtrees first and
- * longest-prefix-wins is not order-dependent.
- *
- * <p>This is not a compatibility alias in the sense the migration brief rules out ("the old path is
- * gone, not redirected"). Nothing is deployed behind this gateway, so there is no old caller being
- * humoured and no URL baked into a live volume; there is only a second upstream that has not been
- * switched off yet. {@code migration-path-conventions.md} §5 makes that the last step: "point the
- * gateway at the services, and delete the monolith's copies."
- *
- * <p><b>So the deletion trigger is named and mechanical:</b> when {@code qits.gateway.app-host} is
- * unset in the shipped {@code application.properties} — no catch-all, nothing left to fall through
- * to — {@link #onTheMonolith} is deleted whole, along with its half of {@code PublicPathsTest}. It
- * is one method and one test group precisely so that removal is a deletion rather than an edit
- * through a boolean expression, where an entry can be dropped by accident and nothing notices.
+ * <p>The grouping survives because it still says something: a path is public either because this
+ * process serves it to a caller with no session yet, or because a service serves it to a caller
+ * that cannot hold a token at all. Adding an entry means deciding which, and that is the question
+ * worth being forced to answer.
  */
 public final class PublicPaths {
 
@@ -54,7 +36,7 @@ public final class PublicPaths {
 
   /** Expects a normalized path (dot-segments collapsed) — see {@link QitsAuthPolicy}. */
   public static boolean isPublic(String path) {
-    return gatewaysOwn(path) || onAService(path) || onTheMonolith(path);
+    return gatewaysOwn(path) || onAService(path);
   }
 
   /**
@@ -129,26 +111,5 @@ public final class PublicPaths {
         || path.startsWith("/workspaces/daemon/")
         // Cross-origin capture ingest from a fixture SPA (its own CORS route in the service).
         || path.equals("/workspaces/api/capture");
-  }
-
-  /**
-   * <b>Transitional — delete this method whole when {@code qits.gateway.app-host} goes.</b> The
-   * monolith-relative spellings, which are what the {@code /} catch-all still carries and are
-   * correct for every request that falls through to it. See the class javadoc for why they coexist
-   * with {@link #onAService} rather than having been replaced by it.
-   */
-  private static boolean onTheMonolith(String path) {
-    return path.startsWith("/git/") // container clone/push against the git host
-        || path.equals("/mcp")
-        || path.startsWith("/mcp/") // the coding agent's MCP servers, called in-container
-        || path.startsWith(
-            "/api/workspace-daemon/") // in-container workspace-daemon's dial-home control socket
-        || path.startsWith("/api/otel/") // OTLP ingest from containers and fixture SPAs
-        || path.equals("/api/capture") // cross-origin capture ingest (own CORS route)
-        || path.startsWith(
-            "/api/artifacts/") // blob store: CI uploaders (writes token-guarded) + <img> serves
-        || path.equals("/api/artifacts")
-        // Same reasoning as the /ci/api/events/ entry above: only the intake, never the run reads.
-        || path.startsWith("/api/ci/events/");
   }
 }
