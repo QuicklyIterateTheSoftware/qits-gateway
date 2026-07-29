@@ -70,6 +70,26 @@ class PublicPathsTest {
     }
 
     @Test
+    void theRegistryRootIsPublicAndIsTheOneNonSegmentPrefixedEntry() {
+      // docker's version probe, in both the spellings a client actually sends.
+      assertTrue(PublicPaths.isPublic("/v2"));
+      assertTrue(PublicPaths.isPublic("/v2/"));
+      assertTrue(PublicPaths.isPublic("/v2/qits/alpine/manifests/latest"));
+      assertTrue(PublicPaths.isPublic("/v2/qits/alpine/blobs/uploads/"));
+      // A multi-slash OCI name is still one path under the same root.
+      assertTrue(
+          PublicPaths.isPublic("/v2/qits/build-images/ci-base/blobs/sha256:" + "0".repeat(64)));
+
+      assertFalse(PublicPaths.isPublic("/v2x")); // prefix must not bleed
+      assertFalse(PublicPaths.isPublic("/v20/x"));
+
+      // The registry has exactly ONE address. A prefixed spelling is not a second one, and must not
+      // become public just by looking as though it belongs to artifacts.
+      assertFalse(PublicPaths.isPublic("/artifacts/v2"));
+      assertFalse(PublicPaths.isPublic("/artifacts/v2/qits/alpine/manifests/latest"));
+    }
+
+    @Test
     void theBlobStoreIsPublicUnderTheArtifactsSegment() {
       // Token-free at the session-policy layer — CI uploaders hold no session; writes are guarded
       // by the static-token filter in the service, reads must work as a plain <img> src.

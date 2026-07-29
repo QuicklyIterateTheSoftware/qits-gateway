@@ -11,7 +11,8 @@ import java.util.Optional;
 /**
  * The gateway's single source of truth for "which component owns this path". It is built from the
  * {@link QitsService} registry: each {@code qits.gateway.proxy-hosts.<segment>} entry becomes a
- * route to that service, and nothing else becomes anything.
+ * route to that service for every prefix it claims — almost always exactly one — and nothing else
+ * becomes anything.
  *
  * <p><b>There is no catch-all.</b> A path no route claims is a 404 here, not a forward to some
  * default upstream. That used to be the qits monolith, which this deployment does not have and will
@@ -38,12 +39,14 @@ public class RouteTable {
   private RouteTable(List<GatewayRoute> routes) {
     this.routes =
         routes.stream()
-            // Longest prefix first, then by name so the order is stable for equal-length prefixes
-            // (which can only happen for genuinely different paths).
+            // Longest prefix first, then by PREFIX so the order is total. It used to tie-break by
+            // name, which stopped being total the moment a service could claim more than one
+            // prefix: several routes now share a name, and two equal-length prefixes would fall
+            // back to declaration order — i.e. to Map iteration order, which is not one.
             .sorted(
                 Comparator.comparingInt((GatewayRoute r) -> r.prefix().length())
                     .reversed()
-                    .thenComparing(GatewayRoute::name))
+                    .thenComparing(GatewayRoute::prefix))
             .toList();
   }
 
@@ -75,13 +78,19 @@ public class RouteTable {
                               + entry.getKey()
                               + "' in qits.gateway.proxy-hosts; known services are: "
                               + QitsService.knownSegments()));
-      resolved.add(toServiceRoute(service, entry.getValue()));
+      resolved.addAll(toServiceRoutes(service, entry.getValue()));
     }
     return resolved;
   }
 
-  /** Turn a {@code proxy-hosts} value ({@code host} or {@code host:port}) into a service route. */
-  private static GatewayRoute toServiceRoute(QitsService service, String hostPort) {
+  /**
+   * Turn a {@code proxy-hosts} value ({@code host} or {@code host:port}) into that service's routes
+   * — one per {@link QitsService#pathPrefixes() claimed prefix}, all pointing at the same upstream.
+   * Almost always a single-element list; the exception is a protocol root a client hardcodes
+   * (qits-artifacts' {@code /v2}), which has to reach the same container as {@code /artifacts} from
+   * the same single configuration entry, without a deployment naming it twice.
+   */
+  private static List<GatewayRoute> toServiceRoutes(QitsService service, String hostPort) {
     String value = hostPort == null ? "" : hostPort.trim();
     int colon = value.lastIndexOf(':');
     String host = colon < 0 ? value : value.substring(0, colon);
@@ -91,7 +100,9 @@ public class RouteTable {
       throw new IllegalArgumentException(
           "qits.gateway.proxy-hosts." + service.segment() + " has no host");
     }
-    return GatewayRoute.forService(service, host, port);
+    return service.pathPrefixes().stream()
+        .map(prefix -> GatewayRoute.forService(service, prefix, host, port))
+        .toList();
   }
 
   /** The route claiming {@code path}, or empty when nothing does (⇒ the gateway answers 404). */

@@ -27,6 +27,15 @@ services:
       # public path drops the qits- prefix (qits-artifacts -> /artifacts/*); the value is the
       # container's qits-net name (host, or host:port). Uncomment each as its process goes live —
       # callers see no difference, it is the same origin with a new upstream:
+      #
+      # The artifacts entry claims TWO prefixes. qits-artifacts serves the OCI registry at the
+      # root-level /v2 the Distribution API fixes (docker and podman accept no path prefix), so
+      # enabling artifacts also routes /v2/* to the same container. There is no second key: a
+      # QITS_GATEWAY_PROXY_HOSTS_V2 is still an "unknown qits service" startup error.
+      #
+      # A client pushing to that over plain HTTP needs the daemon-side opt-in — `insecure-registries`
+      # in /etc/docker/daemon.json, or `insecure = true` in podman's registries.conf. That step
+      # disappears once this listener terminates TLS. See qits-artifacts' README.
       # QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS: "qits-artifacts"
       # QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY: "qits-observability"
     networks:

@@ -9,7 +9,11 @@ package eu.wohlben.qits.gateway;
  * and the {@code host[:port]} parsing — the parts with actual edge cases — are unit-testable
  * without booting an application (see {@code RouteTableTest}).
  *
- * @param name the service segment; used in logs and the health check
+ * @param name the service segment; used in logs and the health check. <b>Not unique</b> — a service
+ *     claiming more than one prefix produces one route per prefix, all under its name, because a
+ *     service with two prefixes is still one component. The <em>prefix</em> is what identifies a
+ *     route, which is why {@code GatewayRouter} keys its proxies on the record rather than the
+ *     name.
  * @param prefix the normalised prefix: leading slash, no trailing slash
  * @param host upstream hostname (config only, never request-derived)
  * @param port upstream port
@@ -20,9 +24,14 @@ public record GatewayRoute(String name, String prefix, String host, int port) {
     prefix = normalisePrefix(prefix);
   }
 
-  /** The route for a service: it claims {@code /<segment>} and forwards to the configured host. */
-  public static GatewayRoute forService(QitsService service, String host, int port) {
-    return new GatewayRoute(service.segment(), service.pathPrefix(), host, port);
+  /**
+   * The route for one of a service's {@link QitsService#pathPrefixes() claimed prefixes},
+   * forwarding to the configured host. The prefix is passed in rather than derived, because a
+   * service may claim several and they all reach the same upstream from the same configuration
+   * entry.
+   */
+  public static GatewayRoute forService(QitsService service, String prefix, String host, int port) {
+    return new GatewayRoute(service.segment(), prefix, host, port);
   }
 
   /**

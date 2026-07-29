@@ -64,7 +64,8 @@ build.
 
 ```
 src/main/java/eu/wohlben/qits/gateway/
-  QitsService.java            the registry: enum of proxyable services; segment/host derivation
+  QitsService.java            the registry: enum of proxyable services; segment/host derivation,
+                              plus the extra root-level prefixes a service may claim (/v2)
   GatewayConfig.java          @ConfigMapping — the entire configuration surface
   GatewayRoute.java           one resolved route; prefix matching (framework-free)
   RouteTable.java             config -> routes (segment validation, host:port parse); longest-prefix
@@ -86,6 +87,15 @@ Routing is **verbatim** (no path rewriting): a service is reached at `/<segment>
 sees that path unchanged. Services are the closed `QitsService` set; a service is live only when a
 `qits.gateway.proxy-hosts.<segment>` entry names its host. Add a service by extending the enum, not
 by inventing a config key.
+
+A service may also claim **extra, root-level prefixes** (`QitsService.pathPrefixes()`), which is how
+qits-artifacts gets `/v2` — the OCI registry root that docker and podman hardcode and that has no
+segment-prefixed spelling. One `proxy-hosts` entry then produces several routes. Two consequences a
+change here must respect: `GatewayRoute.name()` is **no longer unique**, so `GatewayRouter` keys its
+proxy map on the record rather than the name, and `RouteTable`'s comparator tie-breaks on `prefix()`
+rather than `name()` so the ordering stays total. An extra prefix is a concession to a client whose
+address we do not control — never a convenience alias, and `QitsServiceTest` asserts no extra can
+shadow another service's segment.
 
 **There is no catch-all, and do not reintroduce one.** `/` used to route to the qits monolith via
 `qits.gateway.app-host`; qits deploys clean now, with no monolith beside these services and no

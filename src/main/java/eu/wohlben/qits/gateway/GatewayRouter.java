@@ -66,8 +66,14 @@ public class GatewayRouter {
 
   /**
    * One reusable proxy per route — the origin is fixed, so there is nothing to build per request.
+   *
+   * <p>Keyed by the route record itself, not by {@code route.name()}. A service may claim more than
+   * one prefix (qits-artifacts claims {@code /artifacts} and the registry's {@code /v2}), so a name
+   * is shared by several routes and keying on it would silently collapse them into whichever was
+   * written last. A record's value equality makes the key exactly as unique as a route is, so the
+   * mistake is not available rather than merely avoided.
    */
-  private final Map<String, HttpProxy> proxies = new HashMap<>();
+  private final Map<GatewayRoute, HttpProxy> proxies = new HashMap<>();
 
   private HttpClient client;
 
@@ -78,12 +84,28 @@ public class GatewayRouter {
   private EdgeHeaders edgeHeaders;
 
   void init(@Observes Router router) {
-    client = vertx.createHttpClient(new HttpClientOptions().setKeepAlive(true));
+    client =
+        vertx.createHttpClient(
+            new HttpClientOptions()
+                .setKeepAlive(true)
+                // Vert.x pools per ORIGIN and defaults to FIVE connections, behind an unbounded
+                // wait queue. A single `docker push` opens up to five concurrent layer uploads on
+                // its own (--max-concurrent-uploads defaults to 5) and each holds its connection
+                // for the whole of a multi-minute transfer — so on the default, one push saturates
+                // the artifacts origin and everything else routed there (blob reads served as <img>
+                // srcs, `git clone`, the CI post-receive fetches) queues behind it with nothing
+                // logged anywhere to say why.
+                .setMaxPoolSize(64)
+                // Stated rather than inherited. Zero — no client-side idle timeout — is already the
+                // default and has to stay: quarkus.http.idle-timeout=1H keeps the inbound half of a
+                // long exchange alive, and a timeout here would sever exactly what that setting
+                // exists for: SSE channels, HMR sockets, and a slow layer push.
+                .setIdleTimeout(0));
     // Nothing the interceptor does is route-specific (verbatim forwarding), so one is shared.
     edgeHeaders = new EdgeHeaders(config.forwarded());
     for (GatewayRoute route : routeTable.routes()) {
       proxies.put(
-          route.name(),
+          route,
           HttpProxy.reverseProxy(client)
               .origin(route.port(), route.host())
               .addInterceptor(edgeHeaders));
@@ -129,6 +151,6 @@ public class GatewayRouter {
     if (EdgeHeaders.isWebSocketUpgrade(rc.request())) {
       edgeHeaders.applyToUpgrade(rc.request());
     }
-    proxies.get(route.get().name()).handle(rc.request());
+    proxies.get(route.get()).handle(rc.request());
   }
 }

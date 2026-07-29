@@ -57,10 +57,27 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
     server.createContext(
         "/",
         exchange -> {
+          // Drained rather than ignored, so a test can assert that a body larger than Quarkus'
+          // default wire limit actually arrived instead of only that the exchange returned 200.
+          long received;
+          try {
+            received = exchange.getRequestBody().transferTo(OutputStream.nullOutputStream());
+          } catch (java.io.IOException e) {
+            received = -1;
+          }
           String body =
               String.join(
                       "\n",
                       "path=" + exchange.getRequestURI(),
+                      "method=" + exchange.getRequestMethod(),
+                      "body-bytes=" + received,
+                      // Kept on an ordinary request, deliberately. This is the opposite of what
+                      // REPORTED_HANDSHAKE_HEADERS asserts about a WebSocket handshake, and the
+                      // asymmetry IS the contract rather than a bug: a handshake rebuilds its
+                      // headers from an allow-list that drops Authorization, while an ordinary
+                      // request forwards it verbatim — which is the whole of how a registry push
+                      // credential reaches qits-artifacts through this gateway.
+                      "authorization=" + header(exchange, "Authorization"),
                       "host=" + header(exchange, "Host"),
                       "x-forwarded-for=" + header(exchange, "X-Forwarded-For"),
                       "x-forwarded-host=" + header(exchange, "X-Forwarded-Host"),

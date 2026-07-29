@@ -66,6 +66,15 @@ protocol, dev-server HMR sockets and large artifact uploads working through the 
                       └───────────────┘ └───────────────────┘ └─────────────────┘
 ```
 
+A service may claim **one additional, root-level prefix** when a protocol client hardcodes an
+address the gateway does not get to choose. There is exactly one today: `qits-artifacts` also claims
+`/v2`, the OCI Distribution API root, because docker and podman resolve an image reference against
+`<host>/v2/` and accept no path prefix — so the registry has no `/artifacts/…` spelling to route
+instead. It rides the **artifacts** `proxy-hosts` entry: there is no `…_V2` key (naming one is still
+an "unknown qits service" startup error), no second host for a deployment to hold in sync, and no
+phantom component in the startup log or the readiness payload. It is not an alias mechanism —
+`/artifacts/v2` is not a second address for it, and does not exist.
+
 The set of services the gateway can front is a **named registry** — the `QitsService` enum. A
 service's public identity drops the `qits-` prefix, so `qits-artifacts` is reached at `/artifacts/*`
 and forwarded to the `qits-artifacts` container. Which services are *live* is a deployment decision
@@ -108,13 +117,16 @@ is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim
 
 | Service (submodule) | Segment | Reached at | Default host |
 | --- | --- | --- | --- |
-| `qits-artifacts` | `artifacts` | `/artifacts/*` | `qits-artifacts` |
+| `qits-artifacts` | `artifacts` | `/artifacts/*`, `/v2/*` ᵃ | `qits-artifacts` |
 | `qits-observability` | `observability` | `/observability/*` | `qits-observability` |
 | `qits-workspaces` | `workspaces` | `/workspaces/*` | `qits-workspaces` |
 | `qits-projects` | `projects` | `/projects/*` | `qits-projects` |
 | `qits-stt` | `stt` | `/stt/*` | `qits-stt` |
 | `qits-ci` | `ci` | `/ci/*` | `qits-ci` |
 | `qits-cd` | `cd` | `/cd/*` | `qits-cd` |
+
+ᵃ `/v2/*` is the OCI registry root, claimed by the artifacts entry rather than by a key of its own —
+see "The routing model". It is the only prefix in the system that is not a service segment.
 
 (The "default host" is the container's `qits-net` DNS name — what you would normally put in the
 `proxy-hosts` value. Add a service to the enum when a new component splits out.) As environment
@@ -158,6 +170,13 @@ exchanges pass through here).
   `Remote-Email`, `X-Auth-Request-*` and `X-Forwarded-User`/`-Groups` are removed from every inbound
   request. This matters when something still fronts the gateway. Extend that list per deployment;
   **never** shrink it below what whatever sits in front of the gateway injects.
+- **`Authorization` is forwarded verbatim on an ordinary request.** It is neither reserved nor on the
+  strip list, and that is load-bearing rather than incidental: the OCI registry's write guard lives
+  in qits-artifacts, and a push credential (`skopeo --dest-creds`, `podman push --creds`) is an HTTP
+  Basic header that has to survive this hop intact. **Adding `Authorization` to
+  `qits.gateway.forwarded.strip-request-headers` breaks every authenticated image push**, with no
+  error here to say why. Note the deliberate asymmetry with the WebSocket rule below, which drops it:
+  a handshake is a protocol negotiation, not a request an upstream answers.
 - **`X-Forwarded-For` is set, not appended** — the gateway is the outermost hop, so any inbound value
   is client-supplied and worthless.
 - **A WebSocket handshake forwards an allow-list, not everything-minus-the-prefix.** Only the RFC
@@ -212,6 +231,16 @@ expires:
   `/observability/api/otel/*`, `/ci/api/events/*`, `/workspaces/daemon/*`, `/projects/mcp`, …) —
   permanent, and identical to the address the service serves on `qits-net` because forwarding is
   verbatim;
+- **`/v2/*`** — the OCI registry, and the one entry that is not segment-prefixed, because the client
+  hardcodes the root. Both directions are public here and both are deliberate. Pulls are anonymous by
+  design: image names are meant to be *shared*, and are guessable on purpose, which is why
+  `/v2/_catalog` stays unimplemented and the posture stays private-network rather than capability-URL
+  the way the git host is. Pushes are public *at this layer* so the write guard can be
+  qits-artifacts' own — an unauthenticated push has to reach the service to be answered `401` +
+  `WWW-Authenticate: Basic`. Challenging here instead would mean a 302 into the IdP: a registry
+  client sends no `Sec-Fetch-Mode`, no `X-Requested-With` and no `Accept: text/event-stream`, so
+  `NonNavigationRequestChecker` keeps the redirect default, and an HTML login page is not something
+  docker can follow;
 There used to be a third group: the monolith-relative forms (`/git/*`, `/api/otel/*`, `/mcp/*`, …),
 which were public because the `/` catch-all's upstream served them. They went with the catch-all.
 Those paths now name no upstream, so they are neither routed nor public — `PublicPathsTest` asserts

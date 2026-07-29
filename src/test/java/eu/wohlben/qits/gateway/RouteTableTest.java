@@ -102,7 +102,10 @@ class RouteTableTest {
 
     assertEquals("artifacts", matched(table, "/artifacts/blobs"));
     assertEquals("observability", matched(table, "/observability/v1"));
-    assertEquals(2, routes.size());
+    // Three routes from two entries: a route is created per CLAIMED PREFIX, not per service, and
+    // artifacts claims /v2 as well (see oneConfigEntryCanProduceMoreThanOneRoute). Every other
+    // service claims exactly its segment, which QitsServiceTest holds to.
+    assertEquals(3, routes.size());
   }
 
   @Test
@@ -140,5 +143,59 @@ class RouteTableTest {
             IllegalArgumentException.class,
             () -> RouteTable.buildRoutes(Map.of("nope", "qits-nope")));
     assertTrue(e.getMessage().contains("nope"));
+  }
+
+  @Test
+  void oneConfigEntryCanProduceMoreThanOneRoute() {
+    // qits-artifacts serves the OCI registry at the root-level /v2 that docker hardcodes, so its
+    // single proxy-hosts entry has to claim two prefixes reaching the same upstream. One entry, not
+    // two keys a deployment must hold in sync.
+    List<GatewayRoute> routes = RouteTable.buildRoutes(Map.of("artifacts", "qits-artifacts"));
+    assertEquals(2, routes.size());
+    assertTrue(routes.stream().allMatch(r -> r.name().equals("artifacts")));
+    assertTrue(routes.stream().allMatch(r -> r.upstream().equals("qits-artifacts:8080")));
+
+    RouteTable table = RouteTable.of(routes);
+    assertEquals("artifacts", matched(table, "/artifacts/api"));
+    assertEquals("artifacts", matched(table, "/v2"));
+    assertEquals("artifacts", matched(table, "/v2/"));
+    assertEquals("artifacts", matched(table, "/v2/qits/build-images/ci-base/manifests/latest"));
+  }
+
+  @Test
+  void theRegistryRootIsSegmentAwareLikeEveryOtherPrefix() {
+    RouteTable table = RouteTable.of(RouteTable.buildRoutes(Map.of("artifacts", "qits-artifacts")));
+    assertEquals(null, matched(table, "/v2x"));
+    assertEquals(null, matched(table, "/v20/x"));
+  }
+
+  @Test
+  void theRegistryRootIsRoutedOnlyWhenArtifactsIs() {
+    // /v2 is not a standing claim on every gateway: it rides the artifacts entry and appears only
+    // when a deployment has actually routed that service.
+    RouteTable table =
+        RouteTable.of(RouteTable.buildRoutes(Map.of("observability", "qits-observability")));
+    assertEquals(null, matched(table, "/v2/"));
+  }
+
+  @Test
+  void theRegistryRootIsNotAProxyHostsKey() {
+    // An extra prefix rides its service's entry. Naming it directly is still the unknown-service
+    // startup error it always was, which is what keeps the config surface one key per service.
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> RouteTable.buildRoutes(Map.of("v2", "qits-artifacts")));
+  }
+
+  @Test
+  void routeOrderIsTotalEvenWhenNamesRepeat() {
+    // The comparator used to tie-break by name, which stopped being total once one service could
+    // produce several routes. Two equal-length prefixes under one name must still sort
+    // deterministically rather than falling back to map iteration order.
+    RouteTable one = table(route("artifacts", "/aaaa"), route("artifacts", "/bbbb"));
+    RouteTable other = table(route("artifacts", "/bbbb"), route("artifacts", "/aaaa"));
+    assertEquals(
+        one.routes().stream().map(GatewayRoute::prefix).toList(),
+        other.routes().stream().map(GatewayRoute::prefix).toList());
   }
 }

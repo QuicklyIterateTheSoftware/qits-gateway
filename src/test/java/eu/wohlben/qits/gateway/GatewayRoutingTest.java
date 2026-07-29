@@ -35,6 +35,56 @@ class GatewayRoutingTest {
   }
 
   @Test
+  void theRegistryRootReachesArtifactsVerbatim() {
+    // /v2 is the first prefix in the system that is not /<segment>, so nothing else in this suite
+    // proves the gateway forwards it at all — let alone unrewritten.
+    given().when().get("/v2/").then().statusCode(200).body(containsString("path=/v2/"));
+  }
+
+  @Test
+  void aMultiSlashRegistryPathIsForwardedUnrewritten() {
+    // The single most important registry assertion here. An OCI name may contain slashes, and the
+    // service splits repository from image on the FIRST one — so a gateway that normalised, merged
+    // or stripped any part of this path would break a push in a way only a real client would show.
+    given()
+        .when()
+        .get("/v2/qits/build-images/ci-base/manifests/latest")
+        .then()
+        .statusCode(200)
+        .body(containsString("path=/v2/qits/build-images/ci-base/manifests/latest"));
+  }
+
+  @Test
+  void aDigestReferenceSurvivesTheColonInThePath() {
+    // Worth pinning because a reader will wonder: RouteTable parses host:port with lastIndexOf(':')
+    // and a digest puts a colon in the path. Nothing on the way through may touch it.
+    String digest = "sha256:" + "0".repeat(64);
+    given()
+        .urlEncodingEnabled(false)
+        .when()
+        .get("/v2/qits/alpine/blobs/" + digest)
+        .then()
+        .statusCode(200)
+        .body(containsString("path=/v2/qits/alpine/blobs/" + digest));
+  }
+
+  @Test
+  void aBodyLargerThanTheQuarkusDefaultWireLimitStreamsThrough() {
+    // The gateway analogue of the artifacts suite's oversized-upload test, and the only automated
+    // guard against quarkus.http.limits.max-body-size being lowered back below what a layer needs.
+    // A push through here would otherwise 413 at the front door, bodiless, before the registry
+    // could answer with the spec's error envelope.
+    byte[] body = new byte[12 * 1024 * 1024];
+    given()
+        .body(body)
+        .when()
+        .post("/v2/qits/alpine/blobs/uploads/x")
+        .then()
+        .statusCode(200)
+        .body(containsString("body-bytes=" + body.length));
+  }
+
+  @Test
   void describesTheOriginalClientToTheUpstream() {
     given()
         .when()

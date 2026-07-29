@@ -15,8 +15,8 @@ package eu.wohlben.qits.gateway.security;
  *
  * <ul>
  *   <li>{@link #gatewaysOwn} — served by this process.
- *   <li>{@link #onAService} — served by a split-out service under its own {@code /<segment>/…}
- *       prefix.
+ *   <li>{@link #onAService} — served by a split-out service, almost always under its own {@code
+ *       /<segment>/…} prefix. The one exception is a protocol root a client hardcodes; see there.
  * </ul>
  *
  * <p>There was a third, {@code onTheMonolith}: the monolith-relative spellings ({@code /git/},
@@ -67,15 +67,40 @@ public final class PublicPaths {
   }
 
   /**
-   * The segment-prefixed forms, per {@code migration-path-conventions.md}. Each is served by one
-   * split-out service and reaches it verbatim: the gateway does not rewrite, so the address below
-   * is also the address the service itself must serve — including for the service-to-service calls
-   * on {@code qits-net} that never pass through here at all.
+   * Paths a split-out service serves. Almost all are the <b>segment-prefixed</b> forms, per {@code
+   * migration-path-conventions.md}, and each reaches its service verbatim: the gateway does not
+   * rewrite, so the address below is also the address the service itself must serve — including for
+   * the service-to-service calls on {@code qits-net} that never pass through here at all.
+   *
+   * <p>{@code /v2} is the one entry that is not segment-prefixed, and it is an exception to the
+   * spelling rather than to the grouping. It is still a path a service serves to a caller holding
+   * no session — the question this grouping exists to force — it simply has no prefixed form to be
+   * public under, because the client hardcodes the root.
    */
   private static boolean onAService(String path) {
     return
     // qits-artifacts is the git host: container clone/push, and qits-ci's own fetches.
     path.startsWith("/artifacts/git/")
+        // qits-artifacts is also the OCI registry, at the root-level /v2 the Distribution API
+        // fixes: docker and podman resolve <host>/<name>:<tag> against /v2/ and will not look
+        // anywhere else, so there is no /artifacts/… spelling of this and no way to give it one.
+        //
+        // BOTH directions are public here, for different reasons, and both are deliberate. Pulls
+        // are anonymous by design: image names are meant to be SHARED and are guessable on purpose
+        // — which is exactly why /v2/_catalog stays unimplemented and the posture stays
+        // private-network, rather than being defended by a capability url the way the git host is.
+        // Pushes are public AT THIS LAYER so the write guard can be the service's: an
+        // unauthenticated PUT has to reach qits-artifacts to be answered 401 + WWW-Authenticate:
+        // Basic, which is the whole of what lets a producer authenticate at all. Challenging here
+        // instead would send a 302 to the IdP — a registry client sends no Sec-Fetch-Mode, no
+        // X-Requested-With and no Accept: text/event-stream, so NonNavigationRequestChecker keeps
+        // the redirect default, and a redirect into an HTML login page is not something docker or
+        // podman can follow.
+        //
+        // Note what this does NOT make public: /artifacts/v2. The registry has exactly one address,
+        // and PublicPathsTest asserts the prefixed spelling stays behind the policy.
+        || path.equals("/v2")
+        || path.startsWith("/v2/")
         // qits-artifacts' blob store is the whole of that service's JSON API. Token-free at the
         // session layer: CI uploaders hold no session (writes are guarded by the static-token
         // filter in the service), and reads have to work as a plain <img> src.

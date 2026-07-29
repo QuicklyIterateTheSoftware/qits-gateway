@@ -45,6 +45,54 @@ class GatewayAuthTest {
   }
 
   @Test
+  void theRegistryVersionProbeIsAnsweredRatherThanRedirected() {
+    // Anonymous, and it must be a 200. A registry client sends no Sec-Fetch-Mode, no
+    // X-Requested-With and no Accept: text/event-stream, so NonNavigationRequestChecker keeps the
+    // redirect default — meaning an unlisted /v2 would 302 into Keycloak's HTML login, which docker
+    // reads as "not a v2 registry". PublicPaths is what prevents that, and this is the proof.
+    given().redirects().follow(false).when().get("/v2/").then().statusCode(200);
+  }
+
+  @Test
+  void aPushCredentialSurvivesToTheRegistry() {
+    // The highest-value assertion in this class for the registry: the only thing proving that
+    // hybrid quarkus-oidc does not eat a non-Bearer Authorization header, and that the
+    // strip-request-headers compatibility list does not either. `skopeo --dest-creds` and
+    // `podman push --creds` send exactly this, and qits-artifacts' own guard is what checks it —
+    // so if it does not arrive intact, every authenticated push fails with no way to see why.
+    given()
+        .redirects()
+        .follow(false)
+        .header("Authorization", "Basic cWl0czp0b2tlbg==")
+        .when()
+        .post("/v2/qits/alpine/blobs/uploads/")
+        .then()
+        .statusCode(200)
+        .body(containsString("authorization=Basic cWl0czp0b2tlbg=="));
+  }
+
+  @Test
+  void anAnonymousPushReachesTheRegistrySoItCanChallengeIt() {
+    // The write side is public AT THIS LAYER on purpose. An unauthenticated push has to reach
+    // qits-artifacts to be answered 401 + WWW-Authenticate: Basic; a challenge issued here instead
+    // would be a 302 no registry client can follow.
+    given()
+        .redirects()
+        .follow(false)
+        .when()
+        .post("/v2/qits/alpine/blobs/uploads/")
+        .then()
+        .statusCode(200);
+  }
+
+  @Test
+  void theRegistryPrefixDoesNotBleedAtThePolicyLayer() {
+    // End-to-end proof that /v2 did not widen into a neighbouring root: /v2x is not the registry,
+    // so it is still challenged like anything else nobody made public.
+    given().redirects().follow(false).when().get("/v2x/y").then().statusCode(302);
+  }
+
+  @Test
   void anUnauthenticatedBackgroundTransportIsRefusedRatherThanRedirected() {
     // NonNavigationRequestChecker's reason for existing, and it matters more here than it did in
     // the monolith: every SSE channel and every websocket in the deployment passes through this one
