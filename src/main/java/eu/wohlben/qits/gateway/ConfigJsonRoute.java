@@ -91,8 +91,24 @@ public class ConfigJsonRoute {
   @ConfigProperty(name = "qits.capture.endpoint")
   Optional<String> captureEndpoint;
 
+  /**
+   * GET <b>and HEAD</b>. The second method is not politeness: the landing SPA ships a {@code
+   * public/api/config.json} stub so a standalone {@code ng serve} has the shape
+   * {@code @qits/angular} expects, and that stub lands in the packaged bundle as a static resource
+   * at this very path. Route order decides between them — 100 here against Quinoa's 1060 — but
+   * {@code router.get()} registers a route for GET <em>only</em>, so a HEAD used to fall past this
+   * handler and be answered by the stub, with a {@code Cache-Control: public, immutable,
+   * max-age=86400} that invited a client to keep it for a day. The two methods have to be one route
+   * for the same reason the strip and the inject are one method in {@code EdgeHeaders}: a later
+   * edit must not be able to separate them.
+   */
   void register(@Observes Router router) {
-    router.get(PATH).order(ROUTE_ORDER).handler(this::handle);
+    router
+        .route(PATH)
+        .method(io.vertx.core.http.HttpMethod.GET)
+        .method(io.vertx.core.http.HttpMethod.HEAD)
+        .order(ROUTE_ORDER)
+        .handler(this::handle);
   }
 
   private void handle(RoutingContext context) {

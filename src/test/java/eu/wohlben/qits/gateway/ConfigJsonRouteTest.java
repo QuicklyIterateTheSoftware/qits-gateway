@@ -43,4 +43,21 @@ class ConfigJsonRouteTest {
         .statusCode(200)
         .header("Cache-Control", is("no-store"));
   }
+
+  @Test
+  void headIsAnsweredByThisRouteAndNotByTheLandingBundlesStub() {
+    // The regression this exists for is invisible from inside the suite, so it is worth spelling
+    // out: the landing SPA ships a public/api/config.json stub for a standalone `ng serve`, and it
+    // lands in the packaged bundle as a static resource on THIS path. Quinoa is off here, so the
+    // stub does not exist and this only asserts that HEAD is handled at all — but on the packaged
+    // image, a HEAD that fell past this route was answered by the stub with
+    // `Cache-Control: public, immutable, max-age=86400`, i.e. an invitation to keep the wrong
+    // identity document for a day. `router.get()` matched GET only; the route now names both.
+    given()
+        .when()
+        .head("/api/config.json")
+        .then()
+        .statusCode(200)
+        .header("Cache-Control", is("no-store"));
+  }
 }
