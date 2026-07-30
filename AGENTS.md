@@ -82,13 +82,14 @@ build.
 ```
 src/main/java/eu/wohlben/qits/gateway/
   QitsService.java            the registry: enum of proxyable services; segment/host derivation,
-                              plus the extra root-level prefixes a service may claim (/v2). ALSO
-                              the source of truth for quarkus.quinoa.ignored-path-prefixes —
-                              QuinoaIgnoredPathsTest is what holds the two in step
+                              plus the extra root-level prefixes a service may claim (/v2). The
+                              ONLY place a service is declared — route order, not a config list,
+                              is what makes a proxied segment beat the landing SPA
   GatewayConfig.java          @ConfigMapping — the entire configuration surface
   GatewayRoute.java           one resolved route; prefix matching (framework-free)
   RouteTable.java             config -> routes (segment validation, host:port parse); longest-prefix
-  GatewayRouter.java          the catch-all Vert.x route; one HttpProxy per route
+  GatewayRouter.java          the catch-all Vert.x route (order 20_000 — read its ROUTE_ORDER
+                              javadoc before moving it); one HttpProxy per route
   EdgeHeaders.java            the only rewrites: header hygiene + X-Forwarded-* (verbatim otherwise)
   RouteTableHealthCheck.java  readiness = a non-empty route table
   AssertedIdentity.java       the identity hand-off from the route handler to EdgeHeaders
@@ -140,16 +141,24 @@ exception once" is how the monolith's catch-all comes back:
   augmentation. No host is selected, no port is parsed, no socket is opened, and no part of a
   request influences what is read. The SSRF invariant is not weakened because nothing about it is
   involved.
-- The failure mode the old rule feared *does* have a new shape, and it has a new guard: an unclaimed
-  path answering `200 text/html` is worse than a 404 for a **machine** client. That is what
-  `quarkus.quinoa.ignored-path-prefixes` is for, and it is why that list is not "some paths worth
-  excluding" but exactly the gateway's own surface plus every prefix `QitsService` claims —
-  asserted by `QuinoaIgnoredPathsTest`, which derives it from the enum. A service added without
-  that line would serve a web page to its own API clients.
-- Ordering makes the layering visible rather than implicit: Quinoa's SPA fallback is at Vert.x route
-  order 40 000, `GatewayRouter` at `Integer.MAX_VALUE - 1000`. The SPA runs **first** on a GET. Any
-  change that assumes "the gateway sees everything" is wrong, and reading `GatewayRouter` alone will
-  not tell you.
+- The failure mode the old rule feared *does* have a new shape: an unclaimed path answering
+  `200 text/html` is worse than a 404 for a **machine** client. The guard is **route order**, not a
+  list. `GatewayRouter` registers at 20 000, between Quinoa's static resources (1060) and Quinoa's
+  SPA fallback (40 000), so a path the route table claims is proxied and only what no route claimed
+  reaches the SPA. `quarkus.quinoa.ignored-path-prefixes` is therefore down to `/api,/q` — the
+  gateway's own machine surface, which no route table covers.
+- **This is the inverted arrangement, and the inversion is the point.** The SPA fallback used to run
+  *first*, which forced `ignored-path-prefixes` to re-state every platform segment — a hand-kept
+  copy of `QitsService` that silently swallowed any segment missing from it. Adding a service now
+  takes one place (the enum plus a `proxy-hosts` entry) and no list.
+- Read `GatewayRouter.ROUTE_ORDER` before touching any of it: it carries the measured order table
+  and its two bounds. Below 1060 the SPA's own assets stop being served; at or past 40 000 the old
+  swallowing behaviour comes back silently. Both Quinoa numbers are read off the jars (Quinoa 2.8.2,
+  Quarkus 3.34.6) and are not API — re-check them when the Quinoa pin moves.
+- What an unmatched path costs is that it is a **200**, not a 404: `GatewayRouter` yields rather than
+  answering, so a service with no `proxy-hosts` entry serves the landing page. `RouteTableHealthCheck`
+  reporting NOT READY is what makes that visible; do not "fix" it by answering 404 in the router,
+  which would take the landing page away from every unclaimed path.
 
 ## Conventions
 
@@ -199,9 +208,13 @@ exception once" is how the monolith's catch-all comes back:
   shell out to a package manager, so **no test in this repo serves or even builds the landing page**
   and none can. What that costs is stated rather than papered over: SPA serving, the `index.html`
   fallback and `/api/config.json` winning over the bundle's own stub are proven on the **packaged
-  image** and on the deployment, not by the suite. What *is* testable without a network is the
-  precedence *rule* — `QuinoaIgnoredPathsTest` — and that is where a regression will actually be
-  introduced. Do not "fix" the gap by enabling Quinoa in tests.
+  image** and on the deployment, not by the suite. Do not "fix" the gap by enabling Quinoa in tests.
+
+  With Quinoa off, nothing is layered behind `GatewayRouter`, so its `next()` on an unmatched path
+  lands on Vert.x's own 404 — which is why the unmatched-path tests still assert 404 and are worth
+  keeping: they prove a gateway with no SPA still gives a machine the machine answer. The half the
+  suite *can* hold is that a configured prefix proxies while appearing in no ignore list
+  (`GatewayRoutingTest`) and that a deep path resolves to its service (`RouteTableTest`).
 - Add a regression test with every bug fix. Tests are JUnit `*Test.java`.
 - Keep the Quarkus platform version, the JDK release and the **Quinoa version** in step with the
   qits monorepo when it moves them (see the README's "Relationship to the qits monorepo"). Quinoa

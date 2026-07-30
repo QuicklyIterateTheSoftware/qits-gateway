@@ -58,10 +58,27 @@ class RouteTableTest {
 
   @Test
   void anUnmatchedPathHasNoRoute() {
-    // There is no catch-all any more, so this is the ONLY outcome for an unclaimed path: no route,
-    // and a 404 from the gateway itself rather than a forward to a default upstream.
+    // There is no catch-all, so an unclaimed path resolves to no route at all. What the GATEWAY
+    // then does with that empty is not this type's business and is deliberately not asserted here:
+    // GatewayRouter yields (rc.next()) and something layered behind it answers — the landing SPA in
+    // a packaged build, Vert.x's 404 where there is none. This value type only says "nobody claims
+    // this", which is what keeps the decision in one place.
     assertEquals(null, matched(table(route("artifacts", "/artifacts")), "/git/repo"));
     assertEquals(null, matched(table(route("artifacts", "/artifacts")), "/index.html"));
+  }
+
+  @Test
+  void aDeepPathResolvesToItsServiceRatherThanFallingThrough() {
+    // The nested case the route ordering exists to serve. In a packaged gateway this same path is
+    // also a candidate for the SPA's deep-link fallback — /ci/runs/123 looks exactly like a
+    // client-side route — and the ONLY reason it is proxied instead is that this match succeeds at
+    // route order 20_000, ahead of the SPA at 40_000. A regression that made this return null would
+    // not 404; it would quietly serve index.html to qits-ci's API clients.
+    RouteTable table = table(route("ci", "/ci"), route("cd", "/cd"));
+
+    assertEquals("ci", matched(table, "/ci/runs/123"));
+    assertEquals("ci", matched(table, "/ci/runs/123/logs"));
+    assertEquals("cd", matched(table, "/cd/deployments/7/status"));
   }
 
   @Test

@@ -130,25 +130,69 @@ class GatewayRoutingTest {
   }
 
   @Test
-  void unroutedPathsAreAnsweredLocallyWithoutConnectingAnywhere() {
-    // What this asserts, precisely: the GATEWAY opens no connection for a path no route claims and
-    // answers it itself. It does NOT assert what a user sees at that path in a packaged build, and
-    // the difference is worth stating rather than letting the test name imply otherwise.
+  void unroutedPathsOpenNoConnectionAndAreNotAnsweredByTheGateway() {
+    // What this asserts, precisely: the GATEWAY opens no connection for a path no route claims, and
+    // does not answer it either — it yields. What answers depends on what is layered BEHIND it, so
+    // the 404 below is Vert.x's, not this application's, and the distinction is the test.
     //
-    // Quinoa is off for the whole suite (%test.quarkus.quinoa=false), so nothing is layered above
-    // this handler here. In a packaged gateway the landing SPA is: its fallback runs at route order
-    // 40_000, well ahead of this catch-all, so a GET to an unclaimed path is re-routed to
-    // index.html and never reaches this 404 at all. A non-GET still does — the SPA handler only
-    // claims GET/HEAD/OPTIONS — and so does any path in quarkus.quinoa.ignored-path-prefixes.
+    // Quinoa is off for the whole suite (%test.quarkus.quinoa=false — no node, no network, and on
+    // a fresh clone no submodule), so nothing is layered behind the proxy here and the yield lands
+    // on the container's own 404. That is the MACHINE answer, and it is the half of the contract
+    // this suite can prove: a gateway that serves no SPA still 404s a path it does not route,
+    // rather than the next() leaking into some other handler.
     //
-    // That layering is why QuinoaIgnoredPathsTest exists, and why the SPA half of the contract is
-    // proven on the image rather than here.
+    // In a packaged gateway the SPA fallback is behind this route (order 40_000 against this
+    // handler's 20_000), so the same request is re-routed to index.html and answers 200. That half
+    // is proven on the image — see the README's probe table — not here.
+    given().when().get("/nothing/here").then().statusCode(404);
+  }
+
+  @Test
+  void aConfiguredPrefixIsProxiedWithoutBeingNamedInTheSpaIgnoreList() {
+    // THE INVARIANT THE ORDERING CHANGE BOUGHT, and the reason this test is worth its own name.
+    //
+    // quarkus.quinoa.ignored-path-prefixes is /api,/q — the gateway's own machine surface and
+    // nothing else. /artifacts appears in it nowhere, yet it proxies, because GatewayRouter runs at
+    // 20_000 and the SPA fallback at 40_000: the ROUTE TABLE decides, and the SPA gets only what no
+    // route claimed. Before, the list had to re-state every platform segment and a service missing
+    // from it was silently answered with index.html instead of being routed.
+    //
+    // Quinoa is off here so this cannot observe the SPA losing the race; what it pins is the other
+    // half, which is the half a regression would break: nothing about being absent from that list
+    // stops a configured prefix from reaching its upstream.
     given()
         .when()
-        .get("/nothing/here")
+        .get("/artifacts/x")
         .then()
-        .statusCode(404)
-        .body(containsString("No qits component is routed here."));
+        .statusCode(200)
+        .body(containsString("path=/artifacts/x"));
+  }
+
+  @Test
+  void aDeepPathUnderAConfiguredPrefixIsProxiedVerbatim() {
+    // The nested case, spelled out because it is the one the ordering has to get right: a deep link
+    // under a routed segment must longest-prefix-match its service and be forwarded UNCHANGED, not
+    // mistaken for a client-side route and rewritten to index.html. /observability is configured to
+    // the stub and named in no ignore list, and the upstream sees every segment of the path.
+    given()
+        .when()
+        .get("/observability/runs/123/detail?tab=logs")
+        .then()
+        .statusCode(200)
+        .body(containsString("path=/observability/runs/123/detail?tab=logs"));
+  }
+
+  @Test
+  void theGatewaysOwnApiSurfaceIsServedLocallyAndNeverProxied() {
+    // /api is one of the two prefixes still in the ignore list, and it is local: ConfigJsonRoute
+    // registers at order 100, far ahead of the proxy at 20_000. No service claims /api, so without
+    // that local route the path would fall through — this pins that it does not.
+    given()
+        .when()
+        .get("/api/config.json")
+        .then()
+        .statusCode(200)
+        .contentType(containsString("application/json"));
   }
 
   @Test

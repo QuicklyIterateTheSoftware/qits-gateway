@@ -105,28 +105,45 @@ page, so it is mounted at `/` — Quinoa's default `ui-root-path`.
 
 ### How it coexists with the route table
 
-The two are layered, and the order is the opposite of what "the gateway routes everything" suggests:
+The two are layered, and **the route table decides precedence** — the proxy is wedged between the
+SPA's two halves rather than sitting behind both:
 
 | Order | Route | Claims |
 | --- | --- | --- |
 | 100 | `ConfigJsonRoute`, `AuthMeRoute` | `/api/config.json`, `/api/auth/me` |
 | 1060 | Quinoa's generated static resources | the bundle's own files (`/`, `/index.html`, `/main-*.js`, …) |
+| 10 000 | `RouteConstants.ROUTE_ORDER_DEFAULT` | where an unordered route would land |
+| **20 000** | **`GatewayRouter`** | **the route table; no match ⇒ `next()`** |
 | 40 000 | Quinoa's SPA fallback | every **GET/HEAD/OPTIONS** not in `ignored-path-prefixes` → `index.html` |
-| `MAX-1000` | `GatewayRouter` | the route table, then a 404 |
 
-So the SPA fallback runs **ahead** of the proxy, and `quarkus.quinoa.ignored-path-prefixes` is what
-keeps the route table winning. It lists the gateway's own two surfaces (`/api`, `/q`) plus **every
-prefix the `QitsService` registry claims** — each segment, and the extra root-level `/v2`. A prefix
-on that list is not re-routed to `index.html`; nothing else about it changes, so the request falls
-through and is proxied verbatim exactly as before.
+Both orders on the Quinoa/Quarkus side are read off the jars this project builds against, not
+assumed: 1060 is Quarkus' `GeneratedStaticResourcesProcessor`, 40 000 is Quinoa's
+`QuinoaRecorder.QUINOA_SPA_ROUTE_ORDER`. `GatewayRouter.ROUTE_ORDER` carries the table and the
+reasoning; anything in `(1060, 40000)` would do, and a value at or past 40 000 silently restores the
+old arrangement.
 
-Two consequences worth stating plainly:
+So a proxied segment beats the landing page **because a route claims it**, and the SPA gets only
+what no route claimed. `quarkus.quinoa.ignored-path-prefixes` is back down to `/api,/q` — the
+gateway's own machine surface, the same list every other qits service carries and for the same
+reason: those paths are served by this process, the route table has no say over them, and something
+must still stop the SPA from answering a mistyped one with a web page.
 
-- **The list is a static value mirroring a closed enum.** That the enum is closed is what makes a
-  static list safe; that it is static is what lets it drift, so `QuinoaIgnoredPathsTest` derives the
-  expected value from `QitsService` and fails if the two stop agreeing. Add a service to the enum
-  and that test tells you about the config line — the drift it prevents is a new service answering
-  its own API clients with a web page.
+Consequences worth stating plainly:
+
+- **A service is added in one place.** Extend `QitsService`, give it a `proxy-hosts` entry, and it
+  is routed. There is no second list to keep in step. That list used to exist — it named every
+  platform segment, because the SPA fallback ran *first* and each segment had to be spelled to hold
+  it off — and a segment missing from it was answered with `index.html` and `200 text/html` instead
+  of being proxied. That failure mode is gone with the ordering that caused it.
+- **An unconfigured service now answers 200, not 404.** A path whose service has no `proxy-hosts`
+  entry is claimed by no route, so it falls through to the landing page — `/projects/x` on a gateway
+  that does not route `projects` is the SPA. That is the quietest of the possible failures, and it
+  is why `RouteTableHealthCheck` reporting **NOT READY** on an empty table matters more than it did:
+  readiness, not a response code, is what makes an unconfigured gateway visible.
+- **There is no way to configure a `/` catch-all**, so nothing can be put in front of the landing
+  page by configuration. `GatewayRoute` rejects an empty prefix rather than normalising it into one,
+  and `proxy-hosts` keys are `QitsService` segments — the single-upstream topology is gone from the
+  configuration surface, not merely unused.
 - **`/api/config.json` is answered by the gateway, not by the bundle.** qits-spa-home ships a
   `public/api/config.json` stub (`{"telemetry":null,"capture":null}`) so a standalone `ng serve` has
   the shape `@qits/angular` expects, and it lands in the bundle as a static resource. It never wins:
@@ -275,8 +292,10 @@ exchanges pass through here).
   authentication bypass through the one door the prefix strip did not cover — and a genuinely
   authenticated socket arrived anonymous. Both halves are in `EdgeHeaders`, one method each, and
   `GatewaySocketRoutingTest` is the regression.
-- **The gateway's own management surface is never proxied.** `/q/*` is served locally even under a
-  `/` catch-all route.
+- **The gateway's own management surface is never proxied.** `/q/*` is served locally whatever the
+  route table says, and `GatewayRouter` passes it to `next()` explicitly rather than matching it.
+  `/q` is also in `quarkus.quinoa.ignored-path-prefixes`, which is what keeps a mistyped management
+  path a 404 instead of the landing page.
 - **Serving the landing page is static serving, not proxying, and the SSRF rule is untouched.** The
   bundle is baked into the binary at build time and answered from memory: nothing about a request
   selects a host, a port or a file path, and `RouteTable` still resolves upstreams from
@@ -407,7 +426,8 @@ unchanged: front the gateway with a forward-auth proxy and have it translate `Re
 | `/api/config.json` | the web components' identity relay (see below) |
 | `/` and every unclaimed GET | the [landing SPA](#the-landing-spa), with client-route fallback |
 
-All are served locally and never proxied, even under a `/` catch-all.
+All are served locally and never proxied — `/api` and `/q` are registered ahead of the proxy (order
+100) or skipped by it, and no route table can claim them.
 
 `/api/config.json` is **web-component configuration, not telemetry configuration**, so it lives with
 the thing that serves the web components rather than with qits-observability, which used to own it.

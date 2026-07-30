@@ -1,6 +1,7 @@
 package eu.wohlben.qits.gateway;
 
 import io.quarkus.runtime.StartupEvent;
+import io.quarkus.vertx.http.runtime.RouteConstants;
 import io.quarkus.vertx.http.runtime.security.QuarkusHttpUser;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
@@ -27,16 +28,16 @@ import org.jboss.logging.Logger;
  * SSE channels, the git smart-HTTP protocol, dev-server HMR sockets and large artifact uploads
  * working through the hub.
  *
- * <p><b>Ordering.</b> The route is registered last ({@link #ROUTE_ORDER}) so the gateway's own
- * endpoints — health under {@code quarkus.http.non-application-root-path} — are served locally
- * rather than proxied, even when a {@code /} catch-all route exists. Paths under that root are
- * additionally passed to {@code next()} explicitly, so a management path with no handler 404s here
- * instead of leaking to an upstream.
+ * <p><b>Ordering.</b> See {@link #ROUTE_ORDER}: the proxy sits between the landing SPA's static
+ * assets and the SPA's deep-link fallback, so the route table decides precedence and the SPA gets
+ * only what no route claimed. Paths under {@code quarkus.http.non-application-root-path} are passed
+ * to {@code next()} explicitly, so the gateway's own management surface is served locally rather
+ * than proxied.
  *
  * <p><b>Security posture.</b> Upstream origins come exclusively from configuration; no request
- * component ever selects a host or port. An unmatched path is answered with 404 by the gateway,
- * which never opens a connection. This is the same "resolve the target from our own state, never
- * from the request" rule qits' in-process proxies follow.
+ * component ever selects a host or port. An unmatched path makes the gateway open no connection at
+ * all — it yields to whatever is layered behind it. This is the same "resolve the target from our
+ * own state, never from the request" rule qits' in-process proxies follow.
  *
  * <p>Authentication has already happened by the time this handler runs — Quarkus mounts the
  * security handlers on the main router ahead of every user route, so an unauthorized request is
@@ -48,10 +49,50 @@ import org.jboss.logging.Logger;
 public class GatewayRouter {
 
   /**
-   * Late enough to sit behind every framework-registered route (Quarkus' static-resource route sits
-   * at 10_000), so the gateway is the fallback for everything nothing else claimed.
+   * <b>The route table decides precedence, and this number is how.</b> The proxy is deliberately
+   * <em>not</em> last: it runs inside a window between two of the landing SPA's handlers, which is
+   * what lets a configured route beat the SPA without any list of paths being kept by hand.
+   *
+   * <p>The orders it is wedged between, all read off the jars this project builds against (Quinoa
+   * 2.8.2, Quarkus 3.34.6) rather than assumed:
+   *
+   * <table>
+   *   <caption>Vert.x route orders on the main router, low to high</caption>
+   *   <tr><th>Order</th><th>Handler</th><th>Where it is written</th></tr>
+   *   <tr><td>100</td><td>{@link ConfigJsonRoute}, {@code AuthMeRoute}</td>
+   *       <td>this repo — the gateway's own {@code /api} surface</td></tr>
+   *   <tr><td>1060</td><td>the SPA's static assets</td>
+   *       <td>Quarkus {@code GeneratedStaticResourcesProcessor}; Quinoa hands it the built bundle
+   *           as {@code GeneratedStaticResourceBuildItem}s</td></tr>
+   *   <tr><td>10 000</td><td>{@code RouteConstants.ROUTE_ORDER_DEFAULT}</td>
+   *       <td>Quarkus — where an unordered route lands</td></tr>
+   *   <tr><td><b>20 000</b></td><td><b>this route</b></td>
+   *       <td>{@code RouteConstants.ROUTE_ORDER_AFTER_DEFAULT}</td></tr>
+   *   <tr><td>40 000</td><td>the SPA deep-link fallback</td>
+   *       <td>Quinoa {@code QuinoaRecorder.QUINOA_SPA_ROUTE_ORDER}</td></tr>
+   * </table>
+   *
+   * <p>Both bounds are load-bearing:
+   *
+   * <ul>
+   *   <li><b>After 1060</b>, so the SPA's own {@code /index.html}, hashed JS and CSS are served as
+   *       files. A proxy ahead of that would have to know which paths are assets, which is the
+   *       hand-kept list this ordering exists to delete. It is also why {@code /} never reaches
+   *       this handler: the static route answers it.
+   *   <li><b>Before 40 000</b>, so a path the route table claims is <em>proxied</em> rather than
+   *       answered with {@code index.html} and {@code 200 text/html}. This is the whole change: the
+   *       SPA fallback used to run first and {@code quarkus.quinoa.ignored-path-prefixes} had to
+   *       re-state every proxied segment to hold it off — a copy of the platform's service list
+   *       that silently swallowed any segment missing from it. Now the SPA is asked last and the
+   *       list is back down to the gateway's own machine surface ({@code /api,/q}).
+   * </ul>
+   *
+   * <p>{@code ROUTE_ORDER_AFTER_DEFAULT} rather than a bare number: the intent is "after everything
+   * this application registers normally, before the SPA's catch-everything", and 20 000 is the name
+   * Quarkus gives the first half of that. Anything in {@code (1060, 40000)} would work; a value at
+   * or past 40 000 silently restores the old behaviour, which is why the bound is spelled here.
    */
-  public static final int ROUTE_ORDER = Integer.MAX_VALUE - 1000;
+  public static final int ROUTE_ORDER = RouteConstants.ROUTE_ORDER_AFTER_DEFAULT;
 
   private static final Logger LOG = Logger.getLogger(GatewayRouter.class);
 
@@ -115,7 +156,11 @@ public class GatewayRouter {
 
   void logTable(@Observes StartupEvent ignored) {
     if (routeTable.isEmpty()) {
-      LOG.warn("No routes configured — every request will be answered with 404.");
+      // Not "every request 404s" any more: with no route claiming anything, every path falls
+      // through to the landing SPA and answers 200. That is a quieter failure than a 404, which is
+      // exactly why RouteTableHealthCheck reports NOT READY on an empty table — the readiness probe
+      // is what makes an unconfigured gateway visible, not the response code a browser sees.
+      LOG.warn("No routes configured — nothing is proxied and readiness will report DOWN.");
       return;
     }
     routeTable
@@ -127,17 +172,26 @@ public class GatewayRouter {
   private void handle(RoutingContext rc) {
     String path = rc.request().path();
     if (path.equals(nonApplicationRootPath) || path.startsWith(nonApplicationRootPath + "/")) {
-      // The gateway's own management surface: never proxied, even under a `/` catch-all.
+      // The gateway's own management surface: never proxied, whatever a route table says. It is
+      // also spelled in quarkus.quinoa.ignored-path-prefixes, which is what stops the SPA fallback
+      // behind this route from turning a mistyped /q path into a 200 text/html.
       rc.next();
       return;
     }
 
     Optional<GatewayRoute> route = routeTable.match(path);
     if (route.isEmpty()) {
-      rc.response()
-          .setStatusCode(404)
-          .putHeader("Content-Type", "text/plain; charset=utf-8")
-          .end("No qits component is routed here.\n");
+      // Nothing is routed here, so this handler has no opinion and yields — it does NOT answer.
+      // What answers depends on what is layered behind it, and both outcomes are intended:
+      //   * a packaged gateway: Quinoa's SPA fallback (order 40_000) re-routes to index.html, so an
+      //     unclaimed path is the landing page. That is the contract — the front door serves the
+      //     platform's page for anything no service claimed.
+      //   * a path in quarkus.quinoa.ignored-path-prefixes (/api, /q — the gateway's own machine
+      //     surface), or a non-GET, or the whole test suite where Quinoa is off: nothing is behind
+      //     this route, so Vert.x answers its own 404. A mistyped MACHINE path must not be handed a
+      //     web page, and this is what keeps that true.
+      // The gateway still opens no connection for an unmatched path; yielding is not forwarding.
+      rc.next();
       return;
     }
     // Reaching here means the security policy already permitted the request, so this is the
