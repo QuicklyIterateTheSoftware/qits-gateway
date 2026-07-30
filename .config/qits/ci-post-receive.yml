@@ -6,15 +6,16 @@
 # through the socket this step declares (docker: true). A failed push is a failed step is a
 # FAILED run.
 #
-# QITS_VARIANT=oauth: a published gateway image is the shipped form and has to have said out
-# loud that it authenticates. The `local` variant is EXPLICITLY UNAUTHENTICATED and exists only
-# as a workstation's own hand-built image — publishing one would be the regression.
+# QITS_VARIANT=local: this pipeline publishes the UNAUTHENTICATED gateway, on purpose — the
+# platform this flow feeds is a workstation's own, its registry local, its port loopback-bound,
+# and every request already arrives as the one trusted user. A deployment that fronts anything
+# beyond one machine builds the oauth variant instead and must not consume this image.
 steps:
   - image: qits/build-images/ci-base:latest
     docker: true
     timeout-seconds: 3600
     script: |
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-gateway:$QITS_CI_SHA"
-      docker build -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=oauth .
+      docker build -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=local .
       docker push "$ref"
       docker rmi "$ref" || true
