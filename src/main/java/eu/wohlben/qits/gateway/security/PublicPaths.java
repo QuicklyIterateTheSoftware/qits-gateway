@@ -111,13 +111,14 @@ public final class PublicPaths {
         // is guarded by the static qits.ci.token. Run reads are NOT public — step output is build
         // logs of a possibly private repository, so /ci/api/runs/… stays behind the policy.
         || path.startsWith("/ci/api/events/")
-        // cd deployments: ONLY the build-succeeded intake is token-free at the session layer (its
-        // caller is qits-ci's CdBuildNotifier — another process, no session); it is guarded by the
-        // static qits.cd.token in the service. The environment surface is NOT here: its writes are
-        // also token-guarded in the service, but their caller (the epic orchestration) sits on
-        // qits-net and never traverses the gateway, so nothing asks for a session-free front-door
-        // spelling and the listing of what runs where stays behind the policy.
-        || path.startsWith("/cd/api/events/")
+        // NOTHING of qits-cd is here, deliberately. Its one machine intake
+        // (/cd/api/events/build-succeeded) is called by qits-ci directly on qits-net and never
+        // traverses the gateway, so no caller asks for a session-free front-door spelling — and
+        // without one there is no token scheme to carry either: the whole of /cd/* stays behind
+        // the session policy, and intra-network callers are trusted. If a deployment ever points
+        // qits-ci's qits.cd.intake-url through the gateway, an allowlist entry plus a write guard
+        // in the service come back TOGETHER (the /ci/api/events/ shape above); one without the
+        // other is either a dead token or an open intake.
         // OTLP ingest from workspace containers and fixture SPAs. The exporters append
         // /v1/<signal> to a literal endpoint, so the subtree is the unit.
         || path.startsWith("/observability/api/otel/")

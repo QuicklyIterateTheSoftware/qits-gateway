@@ -118,17 +118,16 @@ class PublicPathsTest {
     }
 
     @Test
-    void onlyTheCdBuildIntakeIsPublic() {
-      // The same shape one hop down: qits-ci's CdBuildNotifier holds no session, and the intake is
-      // guarded by the static qits.cd.token in the service.
-      assertTrue(PublicPaths.isPublic("/cd/api/events/build-succeeded"));
-      // The environment surface is not public — its machine callers stay on qits-net, and the
-      // listing of what runs where is deployment detail.
+    void nothingOfCdIsPublic() {
+      // Deliberate, and different from ci: qits-ci's build-succeeded notifier dials qits-cd
+      // directly on qits-net and never traverses the gateway, so even the intake has no
+      // session-free front-door spelling — and correspondingly no token guard in the service.
+      // Allowlisting it here without restoring that guard would open the intake to the internet;
+      // this test is what makes that a conscious pair of changes.
+      assertFalse(PublicPaths.isPublic("/cd/api/events/build-succeeded"));
       assertFalse(PublicPaths.isPublic("/cd/api/environments"));
       assertFalse(PublicPaths.isPublic("/cd/api/deployments"));
       assertFalse(PublicPaths.isPublic("/cd/api"));
-      assertFalse(PublicPaths.isPublic("/cd/api/events")); // only the subtree, not the bare path
-      assertFalse(PublicPaths.isPublic("/cdn/api/events/x")); // prefix must not bleed
     }
 
     @Test
