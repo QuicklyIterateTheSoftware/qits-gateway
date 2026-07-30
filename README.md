@@ -484,6 +484,12 @@ than copying it, so a `./mvnw package` leaves the submodule's `dist/` emptied. H
 the next build regenerates it — but it is why the image build, which does *not* regenerate it, first
 re-materialises the bundle in its own layer.
 
+`quarkus:dev` changes too: Quinoa detects Angular, starts `pnpm start` as a dev service on :4200 and
+proxies to it, so dev mode live-reloads the SPA as well as the gateway — and needs `node_modules` to
+do it.
+
+### Commands
+
 ```bash
 # Tests (unit + an end-to-end proxy suite against a stub upstream; no docker needed)
 ./mvnw test
@@ -501,7 +507,9 @@ java -jar target/quarkus-app/quarkus-run.jar
 ./target/qits-gateway
 
 # Native container image. This is how the binary is SHIPPED, not how it is built: the stage brings
-# its own Mandrel builder, which is also the escape hatch on a machine with no GraalVM.
+# its own Mandrel builder, which is also the escape hatch on a machine with no GraalVM. The bundle
+# is NOT built by the stage — build it first, see "The landing SPA".
+(cd src/main/webui && pnpm build)
 docker build -t qits/gateway:latest --build-arg QITS_VARIANT=oauth -f docker/Dockerfile .
 ```
 
