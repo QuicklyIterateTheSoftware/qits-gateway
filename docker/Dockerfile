@@ -82,11 +82,28 @@ ARG QITS_VARIANT
 # arrives in the build context as src/main/webui/dist/ (see .dockerignore). `--version` is the null
 # command: it proves the package manager is really there and does nothing else.
 #
-# THIS DOES NOT FAIL QUIETLY. Quinoa checks for quarkus.quinoa.build-dir immediately after the build
-# command returns, so a context whose dist/ is missing or stale-empty stops the image build with
-# "Quinoa build directory not found: …/dist/qits-spa-home/browser" naming the key. A forgotten
+# THIS DOES NOT FAIL QUIETLY. The `test -f` below stops a context with no bundle before the
+# multi-minute native compile, and Quinoa's own build-dir check would stop it after. A forgotten
 # `pnpm build` in the step is a red build, not a gateway that ships without its landing page.
-RUN ./mvnw -B -ntp package -Dnative -DskipTests \
+#
+# --- and why the bundle is copied onto itself first ----------------------------------------------
+# Quinoa does not copy build-dir into target/quinoa/build, it MOVES it, and overlayfs cannot rename
+# a directory that still lives in a LOWER image layer. It answers EXDEV, the JDK falls back to its
+# cross-file-store path, and that path refuses a non-empty directory — the build dies seconds in
+# with `DirectoryNotEmptyException: …/dist/qits-spa-home/browser`, which names the source and
+# explains nothing. Every other Quinoa build in the platform is immune by accident: their builder
+# stage *creates* dist itself, so it is in the upper layer already. Ours arrives by COPY.
+#
+# One `cp` re-materialises it in the layer that is about to move it. It has to be in THIS `RUN` and
+# not a tidier one of its own — a layer boundary is exactly what it is undoing.
+RUN d=src/main/webui/dist/qits-spa-home/browser; \
+    test -f "$d/index.html" || { \
+      echo "No built landing SPA at $d." >&2; \
+      echo "The build context must carry one: run 'pnpm install --frozen-lockfile && pnpm build'" >&2; \
+      echo "in src/main/webui first — this stage cannot, see the Quinoa flags above." >&2; \
+      exit 1; }; \
+    cp -a "$d" "$d.layer" && rm -rf "$d" && mv "$d.layer" "$d" && \
+    ./mvnw -B -ntp package -Dnative -DskipTests \
       -Dqits.variant=${QITS_VARIANT} -Dquarkus.native.native-image-xmx=4g \
       -Dquarkus.quinoa.package-manager-install=true \
       -Dquarkus.quinoa.package-manager-install.node-version=24.18.0 \
