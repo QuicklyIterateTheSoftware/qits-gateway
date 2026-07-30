@@ -17,8 +17,7 @@ Key facts that shape every change here:
   module. The clone-alone rule now reads **"clone *and* `git submodule update --init`"**: this repo
   carries `qits-spa-home` at `src/main/webui` and Quinoa packages it. `./mvnw test` still needs
   neither the submodule nor node (Quinoa is off under `%test`); `package` needs both. See README
-  "The webui submodule" for the table and for the `insteadOf` line the checkout needs until
-  qits-spa-home's commits reach GitHub.
+  "The webui submodule" for the table.
 - **Compiles to a GraalVM native binary, locally and without docker.** `.sdkmanrc` names
   `25.0.2-graalce`, so `sdk env` gives you a `native-image` and `./mvnw package -Dnative
   -Dqits.variant=…` produces `target/qits-gateway` in about 40 seconds. Two consequences:

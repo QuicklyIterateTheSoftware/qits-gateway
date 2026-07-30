@@ -470,16 +470,6 @@ git submodule update --init src/main/webui
 (cd src/main/webui && npm ci)                   # once; needs the platform's npm registry
 ```
 
-> **Until qits-spa-home's commits reach GitHub**, `.gitmodules`' canonical URL has nothing to fetch.
-> Point git at the platform's own git host without editing the tracked file:
->
-> ```bash
-> git config url."http://localhost:8081/artifacts/git/qits-spa-home".insteadOf \
->     "https://github.com/QuicklyIterateTheSoftware/qits-spa-home.git"
-> ```
->
-> The CI step does exactly this with the `qits-net` spelling; both lines go away together.
-
 What each command needs after that:
 
 | Command | Submodule | node on `PATH` | Network |

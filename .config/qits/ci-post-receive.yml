@@ -35,15 +35,8 @@ steps:
 
       # The daemon's clone does not recurse, so the gitlink at src/main/webui is an empty directory
       # — which Quinoa treats as a misconfiguration rather than "no client", and the image build
-      # would stop at "No package.json found in Web UI directory".
-      #
-      # .gitmodules names the canonical GitHub URL, and qits-spa-home's commits are not on GitHub
-      # yet; they are on the platform's own git host. insteadOf redirects the fetch without editing
-      # the tracked file, so the working tree stays exactly as it was pushed and the canonical URL
-      # keeps being the thing a public clone would use. Drop these two lines the day the commits are
-      # on GitHub.
-      git config url."http://qits-artifacts:8080/artifacts/git/qits-spa-home".insteadOf \
-          "https://github.com/QuicklyIterateTheSoftware/qits-spa-home.git"
+      # would stop at "No package.json found in Web UI directory". A public GitHub repo, one fetch,
+      # no credentials — the same shape every webui-carrying sibling uses.
       git submodule update --init src/main/webui
 
       # THE LOCKFILE is the one file this step edits, and npm leaves no alternative. Same problem
