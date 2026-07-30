@@ -83,23 +83,108 @@ itself.
 
 **Resolution is longest-prefix-wins**, regardless of declaration order, so adding a service never
 depends on where its line lands in a properties file. Matching is **segment-aware** — `/art` never captures `/artifacts/…`, and `/ci` never
-captures `/cicd/…`. A path no route claims (and no live service) is answered with **404 by the
-gateway itself**; it opens no connection.
+captures `/cicd/…`. A path no route claims names **no upstream**: the gateway opens no connection
+for it and answers it itself — with the [landing SPA](#the-landing-spa) on a browser-shaped request,
+and with a 404 otherwise.
 
 Forwarding is **verbatim**: the upstream sees the path unchanged (`/artifacts/blobs` reaches
 qits-artifacts as `/artifacts/blobs`), so a service and the qits SPA both get exactly the paths they
 serve and nothing breaks apps that emit absolute-root asset URLs.
+
+## The landing SPA
+
+The front door serves the platform's landing page out of its own binary. `qits-spa-home` — an
+Angular 21 application that consumes `@qits/ui-components` and `@qits/angular` from qits' own npm
+registry — is a **git submodule at `src/main/webui`**, which is [Quinoa](https://docs.quarkiverse.io/quarkus-quinoa/)'s
+default ui-dir, so the location is a convention rather than a setting. Quinoa turns the built bundle
+into build-time generated static resources: no second container, no nginx, no runtime file system.
+
+Every other qits service mounts its client under its own segment (`/projects/`, `/ci/`, …) because
+the gateway routes it there. The gateway has **no segment**, and this is the platform's landing
+page, so it is mounted at `/` — Quinoa's default `ui-root-path`.
+
+### How it coexists with the route table
+
+The two are layered, and the order is the opposite of what "the gateway routes everything" suggests:
+
+| Order | Route | Claims |
+| --- | --- | --- |
+| 100 | `ConfigJsonRoute`, `AuthMeRoute` | `/api/config.json`, `/api/auth/me` |
+| 1060 | Quinoa's generated static resources | the bundle's own files (`/`, `/index.html`, `/main-*.js`, …) |
+| 40 000 | Quinoa's SPA fallback | every **GET/HEAD/OPTIONS** not in `ignored-path-prefixes` → `index.html` |
+| `MAX-1000` | `GatewayRouter` | the route table, then a 404 |
+
+So the SPA fallback runs **ahead** of the proxy, and `quarkus.quinoa.ignored-path-prefixes` is what
+keeps the route table winning. It lists the gateway's own two surfaces (`/api`, `/q`) plus **every
+prefix the `QitsService` registry claims** — each segment, and the extra root-level `/v2`. A prefix
+on that list is not re-routed to `index.html`; nothing else about it changes, so the request falls
+through and is proxied verbatim exactly as before.
+
+Two consequences worth stating plainly:
+
+- **The list is a static value mirroring a closed enum.** That the enum is closed is what makes a
+  static list safe; that it is static is what lets it drift, so `QuinoaIgnoredPathsTest` derives the
+  expected value from `QitsService` and fails if the two stop agreeing. Add a service to the enum
+  and that test tells you about the config line — the drift it prevents is a new service answering
+  its own API clients with a web page.
+- **`/api/config.json` is answered by the gateway, not by the bundle.** qits-spa-home ships a
+  `public/api/config.json` stub (`{"telemetry":null,"capture":null}`) so a standalone `ng serve` has
+  the shape `@qits/angular` expects, and it lands in the bundle as a static resource. It never wins:
+  `ConfigJsonRoute` is registered at order 100, the static resources at 1060. The collision is easy
+  to *miss* rather than easy to hit, because a dark gateway relays exactly the stub's bytes — the
+  way to tell them apart is the header (`Cache-Control: no-store` is ours, `public, immutable,
+  max-age=86400` is the stub's). That is how the one real bite was found: `router.get()` matches GET
+  only, so **HEAD** used to fall past the route and be answered by the stub with a day-long cache
+  hint. `ConfigJsonRoute` now names both methods on one route.
+
+### Building it
+
+**This repository does not build the SPA from scratch in every context, and the split is deliberate.**
+`qits-spa-home` depends on `@qits/angular` and `@qits/ui-components`, which exist **only** on the
+platform's own npm registry (qits-artifacts). Who can reach that registry decides where the install
+may happen:
+
+| Context | Reaches the platform registry | What it does |
+| --- | --- | --- |
+| a developer on the deployment host | yes (`localhost:8081`, via the submodule's committed `.npmrc`) | Quinoa runs the real `pnpm install --frozen-lockfile` and `pnpm run build`, with the node on `PATH` |
+| the CI step container | yes (on `qits-net`) | runs the install and the build itself, before the image build |
+| a `RUN` step in a docker build | **no** — not the qits-net alias, not `localhost:8081`, not `host.docker.internal` | packages the bundle the step already built; runs no install |
+
+The image build is therefore the deviation, and it is confined to one `RUN` in `docker/Dockerfile`:
+it provisions its own pinned node/pnpm (the Mandrel builder image ships none) and replaces Quinoa's
+install and build commands with `--version`, the null command. **It does not fail quietly:** the
+`RUN` first asserts the bundle is in the context — before the multi-minute native compile — and
+Quinoa's own `build-dir` check would stop it after. A forgotten `pnpm build` is a red build, never a
+gateway that ships without its landing page.
+
+That same `RUN` copies the bundle onto itself before invoking maven, which looks superstitious and
+is not: Quinoa **moves** `build-dir` into `target/quinoa/build`, and overlayfs cannot rename a
+directory that still lives in a lower image layer. It answers `EXDEV`, the JDK falls back to its
+cross-file-store path, and that path refuses a non-empty directory — the build dies with a
+`DirectoryNotEmptyException` naming the source and explaining nothing. Every other Quinoa build in
+the platform is immune by accident, because its builder stage *creates* `dist/` itself. Ours arrives
+by `COPY`, so it has to be re-materialised in the layer that is about to move it — which is also why
+that `cp` cannot be a tidier `RUN` of its own.
+
+The platform's general recipe for this — every other service does have its builder run the client's
+real install — is `docs/project-setup-quinoa-angular.md` in the qits monorepo. This repo follows it
+except where the `@qits` scope forces the split above.
 
 ## Configuration
 
 Everything is MicroProfile config, so any key works as a property, a system property or an
 environment variable.
 
-**There is no catch-all.** A path no service claims is answered 404 by the gateway itself. It used
-to fall through to the qits monolith (`qits.gateway.app-host`), so the split could run beside it and
-take paths over one at a time; qits is deployed clean now — these services and nothing else, sharing
-no database, volume or session with a monolith — so there is no upstream entitled to "everything
-else", and both that key and the route it built are gone.
+**There is still no catch-all upstream.** No proxy route claims "everything else". A path no service
+claims names no upstream, and the gateway opens no connection for it. It used to fall through to the
+qits monolith (`qits.gateway.app-host`), so the split could run beside it and take paths over one at
+a time; qits is deployed clean now — these services and nothing else, sharing no database, volume or
+session with a monolith — so there is no upstream entitled to "everything else", and both that key
+and the route it built are gone.
+
+What did change is what an unclaimed path *looks like*: it is now the landing page rather than a
+404. That is **static serving, not proxying** — no host is selected, no socket is opened, and the
+route table is untouched by it.
 
 A consequence worth knowing: a gateway with no `proxy-hosts` entries routes nothing and reports
 **not ready** (`/q/health/ready`). That is the intended signal, and it is why nothing is enabled by
@@ -192,6 +277,11 @@ exchanges pass through here).
   `GatewaySocketRoutingTest` is the regression.
 - **The gateway's own management surface is never proxied.** `/q/*` is served locally even under a
   `/` catch-all route.
+- **Serving the landing page is static serving, not proxying, and the SSRF rule is untouched.** The
+  bundle is baked into the binary at build time and answered from memory: nothing about a request
+  selects a host, a port or a file path, and `RouteTable` still resolves upstreams from
+  configuration alone. What the SPA changed is which *unclaimed* paths get a 200 instead of a 404 —
+  a question about this process' own output, not about where bytes are sent.
 - **The gateway is the only thing that authenticates.** It performs the login, decides authorization
   (`qits.auth.required-role`), and asserts the resulting identity downstream as `X-Qits-User` /
   `X-Qits-User-Id`. Every other component consumes that header and authenticates nothing — see
@@ -246,6 +336,15 @@ which were public because the `/` catch-all's upstream served them. They went wi
 Those paths now name no upstream, so they are neither routed nor public — `PublicPathsTest` asserts
 they are *protected*, rather than simply dropping the cases, so a re-added catch-all fails a test
 instead of silently reopening an anonymous surface.
+
+**The landing page is not public either, and that is the decision rather than an oversight.** `/` is
+not in `PublicPaths`, so an `oauth` gateway challenges an anonymous visitor *before* serving a byte
+of the SPA: the front door asks who you are and the landing page is what you see once it knows. That
+also means the bundle's own assets (`/main-*.js`, `/styles-*.css`) sit behind the session, which is
+the same posture and needs no separate rule — they are fetched by a browser that has just completed
+the code flow. A `local` gateway has no challenge to make and serves the page openly, like
+everything else in that target. If a deployment ever wants an anonymous landing page, that is one
+entry in `PublicPaths.gatewaysOwn` plus the asset prefixes, taken deliberately.
 
 A **service's** `/q/*` is deliberately not public. Each service's non-application root has moved
 under its segment (`/observability/q/openapi`), but nothing that must reach it comes through the
@@ -306,8 +405,9 @@ unchanged: front the gateway with a forward-auth proxy and have it translate `Re
 | `/q/health/ready` | the route table is non-empty — and the response data *is* the route table |
 | `/api/auth/me` | which auth target this build carries, and who is logged in |
 | `/api/config.json` | the web components' identity relay (see below) |
+| `/` and every unclaimed GET | the [landing SPA](#the-landing-spa), with client-route fallback |
 
-All four are served locally and never proxied, even under a `/` catch-all.
+All are served locally and never proxied, even under a `/` catch-all.
 
 `/api/config.json` is **web-component configuration, not telemetry configuration**, so it lives with
 the thing that serves the web components rather than with qits-observability, which used to own it.
@@ -338,6 +438,51 @@ carries `native-image`, so `sdk env` is the whole toolchain and `-Dnative` compi
 Packaging additionally requires naming an [auth target](#build-targets) — `-Dqits.variant=` is
 enforced from `prepare-package` on, so `test` and `quarkus:dev` run flagless but nothing that
 produces an artifact does.
+
+### The webui submodule
+
+**The clone-alone rule now reads "clone *and* `git submodule update --init`".** That is a real
+change to what this repo needs, so it is written down rather than left to a build error:
+
+```bash
+git submodule update --init src/main/webui
+(cd src/main/webui && git switch main)             # the platform's submodule convention
+(cd src/main/webui && pnpm install --frozen-lockfile)   # once; needs the platform's npm registry
+```
+
+> **Until qits-spa-home's commits reach GitHub**, `.gitmodules`' canonical URL has nothing to fetch.
+> Point git at the platform's own git host without editing the tracked file:
+>
+> ```bash
+> git config url."http://localhost:8081/artifacts/git/qits-spa-home".insteadOf \
+>     "https://github.com/QuicklyIterateTheSoftware/qits-spa-home.git"
+> ```
+>
+> The CI step does exactly this with the `qits-net` spelling; both lines go away together.
+
+What each command needs after that:
+
+| Command | Submodule | node on `PATH` | Network |
+| --- | --- | --- | --- |
+| `./mvnw test` | no | no | no |
+| `./mvnw verify -Dqits.variant=oauth` | yes | yes | no, once `node_modules` is populated ᵇ |
+| `./mvnw package …` | yes | yes | no, same |
+| `docker build …` | yes, plus a built `dist/` | no (the stage brings its own) | public internet only |
+
+ᵇ Quinoa runs `pnpm install --frozen-lockfile` (`quarkus.quinoa.ci=true` — a build of this repo must
+never rewrite a submodule's lockfile), and with `node_modules` already populated pnpm does no
+network I/O at all. The **suite** needs neither node nor the submodule in any case: Quinoa is off
+under `%test`, which is also why what the SPA is actually served as is proven on the packaged image
+and not by a `@QuarkusTest`.
+
+An **uninitialised** gitlink is an empty directory, and that is the one case Quinoa treats as a
+misconfiguration rather than "no client": `package` stops with `No package.json found in Web UI
+directory`. A `src/main/webui` that is missing entirely would instead disable Quinoa with a warning.
+
+One wart to know: Quinoa **moves** `dist/qits-spa-home/browser` into `target/quinoa/build` rather
+than copying it, so a `./mvnw package` leaves the submodule's `dist/` emptied. Harmless here because
+the next build regenerates it — but it is why the image build, which does *not* regenerate it, first
+re-materialises the bundle in its own layer.
 
 ```bash
 # Tests (unit + an end-to-end proxy suite against a stub upstream; no docker needed)
@@ -379,12 +524,21 @@ docker compose -f docker-compose.example.yml up
 
 ## Relationship to the qits monorepo
 
-This repository is a **git submodule** of qits (`qits-gateway/` at its root) so the two travel
-together, but it builds and releases on its own — a clone of *this* repo alone is a complete build.
-Two things are therefore duplicated here on purpose and must be kept in step when qits moves them:
+This repository is a **git submodule** of qits (`services/qits-gateway/`) so the two travel together,
+but it builds and releases on its own — a clone of *this* repo (plus `git submodule update --init`)
+is a complete build. Three things are duplicated here on purpose and must be kept in step when qits
+moves them:
 
-- the **Quarkus platform version** (`quarkus.platform.version` in `pom.xml`), and
-- the **JDK release** (`maven.compiler.release`, `.sdkmanrc`, and the native builder image tag).
+- the **Quarkus platform version** (`quarkus.platform.version` in `pom.xml`),
+- the **JDK release** (`maven.compiler.release`, `.sdkmanrc`, and the native builder image tag), and
+- the **Quinoa version** (`quinoa.version` in `pom.xml`) — Quinoa is in no BOM, and the platform
+  pins one version for every service that serves a client.
+
+It also carries a submodule *of its own*: `src/main/webui` is `qits-spa-home`, which the monorepo
+holds a second time at `frontends/qits-spa-home`. Both entries follow the platform convention
+(`--name <bare repo name>`, `ignore = all`, `update = merge`, `branch = main`), and the two gitlinks
+move independently — the monorepo's says which commit the workspace checks out, the gateway's says
+which commit the front door ships.
 
 Nothing else is shared — the gateway depends on no qits module, which is what lets it start, stop and
 be upgraded independently of what it fronts.
@@ -393,7 +547,8 @@ be upgraded independently of what it fronts.
 
 Implemented: the `QitsService` registry (a named, enum-backed set of proxyable services),
 config-driven longest-prefix / segment-aware routing, verbatim streaming reverse proxy with
-WebSocket passthrough, edge-header hygiene, health/readiness, native build, container image.
+WebSocket passthrough, edge-header hygiene, health/readiness, the landing SPA served from the binary
+via Quinoa, native build, container image.
 
 Planned, per the epic's staging:
 

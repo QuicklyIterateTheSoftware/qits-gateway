@@ -13,8 +13,12 @@ any of them.
 Key facts that shape every change here:
 
 - **Separately deployable, parent-less build.** This repo is a git submodule of the qits monorepo
-  but is *not* a module of its Maven reactor. A clone of this repo alone must build. Never add a
-  `<parent>` or a dependency on a qits module.
+  but is *not* a module of its Maven reactor. Never add a `<parent>` or a dependency on a qits
+  module. The clone-alone rule now reads **"clone *and* `git submodule update --init`"**: this repo
+  carries `qits-spa-home` at `src/main/webui` and Quinoa packages it. `./mvnw test` still needs
+  neither the submodule nor node (Quinoa is off under `%test`); `package` needs both. See README
+  "The webui submodule" for the table and for the `insteadOf` line the checkout needs until
+  qits-spa-home's commits reach GitHub.
 - **Compiles to a GraalVM native binary, locally and without docker.** `.sdkmanrc` names
   `25.0.2-graalce`, so `sdk env` gives you a `native-image` and `./mvnw package -Dnative
   -Dqits.variant=…` produces `target/qits-gateway` in about 40 seconds. Two consequences:
@@ -35,6 +39,9 @@ Key facts that shape every change here:
 ## Commands
 
 ```bash
+git submodule update --init src/main/webui      # the landing SPA; package needs it, test does not
+(cd src/main/webui && pnpm install --frozen-lockfile)   # once; needs the platform's npm registry
+
 ./mvnw test                    # unit tests + the end-to-end proxy suite (no docker needed)
 ./mvnw package -Dqits.variant=oauth   # JVM build -> target/quarkus-app/ (the flag is required)
 ./mvnw package -Dqits.variant=local   # the EXPLICITLY UNAUTHENTICATED build; never internet-expose
@@ -42,8 +49,18 @@ Key facts that shape every change here:
 ./mvnw package -Dnative -Dqits.variant=oauth   # native binary -> target/qits-gateway (no docker)
 ./mvnw test -Dtest=RouteTableTest
 
+(cd src/main/webui && pnpm build)   # REQUIRED before the image build: the builder stage packages
 docker build -t qits/gateway:latest --build-arg QITS_VARIANT=oauth -f docker/Dockerfile .
 ```
+
+**The image build does not build the SPA, and that is the one place this repo deviates from the
+platform's Quinoa recipe** (`docs/project-setup-quinoa-angular.md` in the qits monorepo). `qits-spa-home` depends on
+`@qits/angular` and `@qits/ui-components`, which exist only on the platform's own npm registry, and
+a `RUN` step in a docker build can reach that registry by no address at all. So the install happens
+where it can — a developer's host, or the CI step container on `qits-net` — and the builder stage
+packages an already-built `dist/` with Quinoa's install and build commands replaced by `--version`.
+An install that "worked" inside the image build would have resolved the `@qits` scope against
+npmjs.org, where those names do not exist; it fails loudly instead, and so does a missing bundle.
 
 The `--build-arg` has no default, deliberately: an image is a shipped gateway, and the
 `require-auth-variant` enforcer rule exists so a shipped gateway always said out loud whether it
@@ -65,7 +82,9 @@ build.
 ```
 src/main/java/eu/wohlben/qits/gateway/
   QitsService.java            the registry: enum of proxyable services; segment/host derivation,
-                              plus the extra root-level prefixes a service may claim (/v2)
+                              plus the extra root-level prefixes a service may claim (/v2). ALSO
+                              the source of truth for quarkus.quinoa.ignored-path-prefixes —
+                              QuinoaIgnoredPathsTest is what holds the two in step
   GatewayConfig.java          @ConfigMapping — the entire configuration surface
   GatewayRoute.java           one resolved route; prefix matching (framework-free)
   RouteTable.java             config -> routes (segment validation, host:port parse); longest-prefix
@@ -81,6 +100,10 @@ src/main/java/eu/wohlben/qits/gateway/
     NonNavigationRequestChecker.java   499 instead of 302 for SSE/websocket/XHR (oauth only)
     LocalAuthMechanism.java   the `local` build target's fixed identity (local only)
     LocalIdentityProvider.java
+
+src/main/webui/                 the qits-spa-home submodule — Quinoa's default ui-dir. Not this
+                                repo's code; do not edit it from here, push it in its own repo and
+                                move the gitlink.
 ```
 
 Routing is **verbatim** (no path rewriting): a service is reached at `/<segment>/*` and the upstream
@@ -97,12 +120,36 @@ rather than `name()` so the ordering stays total. An extra prefix is a concessio
 address we do not control — never a convenience alias, and `QitsServiceTest` asserts no extra can
 shadow another service's segment.
 
-**There is no catch-all, and do not reintroduce one.** `/` used to route to the qits monolith via
-`qits.gateway.app-host`; qits deploys clean now, with no monolith beside these services and no
-shared state between them, so nothing is entitled to every unclaimed path. `GatewayRoute` rejects an
-empty prefix outright rather than normalising it back into one, because a config value that lost its
-content would otherwise turn a service route into a catch-all silently. An unrouted path is a 404
-you can see; a catch-all turns it into someone else's problem.
+**There is no catch-all UPSTREAM, and do not reintroduce one.** `/` used to route to the qits
+monolith via `qits.gateway.app-host`; qits deploys clean now, with no monolith beside these services
+and no shared state between them, so no *upstream* is entitled to every unclaimed path.
+`GatewayRoute` rejects an empty prefix outright rather than normalising it back into one, because a
+config value that lost its content would otherwise turn a service route into a catch-all silently.
+
+**The doctrine was amended, on purpose, and here is exactly what changed.** It used to read
+"nothing is entitled to every unclaimed path", and the landing SPA now is. What that sentence was
+protecting is unchanged, and the difference is worth being precise about, because "we made an
+exception once" is how the monolith's catch-all comes back:
+
+- The old rule was about **proxying**. A catch-all upstream meant a path nobody owned got forwarded
+  to a process that could not answer it, turning our 404 into someone else's 502 and hiding a
+  configuration mistake behind a network hop. That is still forbidden: `RouteTable` still resolves
+  upstreams from configuration alone, still opens no connection for an unmatched path, and there is
+  still no key that would name a default target.
+- What serves `/` now is **this process' own static output** — a bundle compiled into the binary at
+  augmentation. No host is selected, no port is parsed, no socket is opened, and no part of a
+  request influences what is read. The SSRF invariant is not weakened because nothing about it is
+  involved.
+- The failure mode the old rule feared *does* have a new shape, and it has a new guard: an unclaimed
+  path answering `200 text/html` is worse than a 404 for a **machine** client. That is what
+  `quarkus.quinoa.ignored-path-prefixes` is for, and it is why that list is not "some paths worth
+  excluding" but exactly the gateway's own surface plus every prefix `QitsService` claims —
+  asserted by `QuinoaIgnoredPathsTest`, which derives it from the enum. A service added without
+  that line would serve a web page to its own API clients.
+- Ordering makes the layering visible rather than implicit: Quinoa's SPA fallback is at Vert.x route
+  order 40 000, `GatewayRouter` at `Integer.MAX_VALUE - 1000`. The SPA runs **first** on a GET. Any
+  change that assumes "the gateway sees everything" is wrong, and reading `GatewayRouter` alone will
+  not tell you.
 
 ## Conventions
 
@@ -148,6 +195,15 @@ you can see; a catch-all turns it into someone else's problem.
 - The suite must keep running **without docker and without network**: no Keycloak Dev Services, no
   live IdP. `src/test/resources/application.properties` pins a static, never-contacted provider —
   the tests assert that the gateway challenges and where it points, not that a code flow completes.
+  `%test.quarkus.quinoa=false` is the same rule applied to the SPA: a `@QuarkusTest` must never
+  shell out to a package manager, so **no test in this repo serves or even builds the landing page**
+  and none can. What that costs is stated rather than papered over: SPA serving, the `index.html`
+  fallback and `/api/config.json` winning over the bundle's own stub are proven on the **packaged
+  image** and on the deployment, not by the suite. What *is* testable without a network is the
+  precedence *rule* — `QuinoaIgnoredPathsTest` — and that is where a regression will actually be
+  introduced. Do not "fix" the gap by enabling Quinoa in tests.
 - Add a regression test with every bug fix. Tests are JUnit `*Test.java`.
-- Keep the Quarkus platform version and the JDK release in step with the qits monorepo when it moves
-  them (see the README's "Relationship to the qits monorepo").
+- Keep the Quarkus platform version, the JDK release and the **Quinoa version** in step with the
+  qits monorepo when it moves them (see the README's "Relationship to the qits monorepo"). Quinoa
+  is in no BOM and the platform pins one version for every service that serves a client; the rule
+  there is that a Quinoa release must have been built against a Quarkus no newer than ours.
