@@ -34,8 +34,31 @@ public final class PublicPaths {
 
   private PublicPaths() {}
 
-  /** Expects a normalized path (dot-segments collapsed) — see {@link QitsAuthPolicy}. */
-  public static boolean isPublic(String path) {
+  /**
+   * Expects a normalized path (dot-segments collapsed) — see {@link QitsAuthPolicy} — and the
+   * request method, which exactly one entry cares about (the registry, below). Everywhere else a
+   * public path is public whole: the split-out services guard their own writes where a guard
+   * exists, and a method distinction here would just restate their filters.
+   */
+  public static boolean isPublic(String method, String path) {
+    // The OCI registry, at the root-level /v2 the Distribution API fixes: docker and podman
+    // resolve <host>/<name>:<tag> against /v2/ and will not look anywhere else, so there is no
+    // /artifacts/… spelling of this and no way to give it one (it is an extra prefix on the
+    // artifacts entry, not a service). READ METHODS ONLY, and this is the one method-aware entry
+    // on the list:
+    //
+    //   * Pulls are anonymous by design — image names are meant to be SHARED and are guessable on
+    //     purpose, which is exactly why /v2/_catalog stays unimplemented and the posture stays
+    //     private-network rather than capability-url like the git host.
+    //   * Writes are NOT public, and this line is the registry's WHOLE external write protection:
+    //     qits-artifacts dropped its Basic-auth push guard (producers on qits-net are trusted, and
+    //     external push is unwanted entirely), so an internet docker push must die here, on a
+    //     session challenge no registry client can answer. Widening this to write methods without
+    //     restoring a guard in qits-artifacts opens push to the internet — the two move together,
+    //     and PublicPathsTest spells that out.
+    if (path.equals("/v2") || path.startsWith("/v2/")) {
+      return "GET".equals(method) || "HEAD".equals(method);
+    }
     return gatewaysOwn(path) || onAService(path);
   }
 
@@ -72,35 +95,15 @@ public final class PublicPaths {
    * rewrite, so the address below is also the address the service itself must serve — including for
    * the service-to-service calls on {@code qits-net} that never pass through here at all.
    *
-   * <p>{@code /v2} is the one entry that is not segment-prefixed, and it is an exception to the
-   * spelling rather than to the grouping. It is still a path a service serves to a caller holding
-   * no session — the question this grouping exists to force — it simply has no prefixed form to be
-   * public under, because the client hardcodes the root.
+   * <p>The registry's {@code /v2} is deliberately NOT in this method: it is the one entry whose
+   * publicness depends on the request method, so it lives in {@link #isPublic} itself. Note what
+   * that entry does not make public either way: {@code /artifacts/v2} — the registry has exactly
+   * one address, and PublicPathsTest asserts the prefixed spelling stays behind the policy.
    */
   private static boolean onAService(String path) {
     return
     // qits-artifacts is the git host: container clone/push, and qits-ci's own fetches.
     path.startsWith("/artifacts/git/")
-        // qits-artifacts is also the OCI registry, at the root-level /v2 the Distribution API
-        // fixes: docker and podman resolve <host>/<name>:<tag> against /v2/ and will not look
-        // anywhere else, so there is no /artifacts/… spelling of this and no way to give it one.
-        //
-        // BOTH directions are public here, for different reasons, and both are deliberate. Pulls
-        // are anonymous by design: image names are meant to be SHARED and are guessable on purpose
-        // — which is exactly why /v2/_catalog stays unimplemented and the posture stays
-        // private-network, rather than being defended by a capability url the way the git host is.
-        // Pushes are public AT THIS LAYER so the write guard can be the service's: an
-        // unauthenticated PUT has to reach qits-artifacts to be answered 401 + WWW-Authenticate:
-        // Basic, which is the whole of what lets a producer authenticate at all. Challenging here
-        // instead would send a 302 to the IdP — a registry client sends no Sec-Fetch-Mode, no
-        // X-Requested-With and no Accept: text/event-stream, so NonNavigationRequestChecker keeps
-        // the redirect default, and a redirect into an HTML login page is not something docker or
-        // podman can follow.
-        //
-        // Note what this does NOT make public: /artifacts/v2. The registry has exactly one address,
-        // and PublicPathsTest asserts the prefixed spelling stays behind the policy.
-        || path.equals("/v2")
-        || path.startsWith("/v2/")
         // qits-artifacts' blob store is the whole of that service's JSON API. Token-free at the
         // session layer: CI uploaders hold no session (writes are guarded by the static-token
         // filter in the service), and reads have to work as a plain <img> src.

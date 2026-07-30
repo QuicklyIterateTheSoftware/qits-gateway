@@ -54,12 +54,29 @@ class GatewayAuthTest {
   }
 
   @Test
-  void aPushCredentialSurvivesToTheRegistry() {
-    // The highest-value assertion in this class for the registry: the only thing proving that
-    // hybrid quarkus-oidc does not eat a non-Bearer Authorization header, and that the
-    // strip-request-headers compatibility list does not either. `skopeo --dest-creds` and
-    // `podman push --creds` send exactly this, and qits-artifacts' own guard is what checks it —
-    // so if it does not arrive intact, every authenticated push fails with no way to see why.
+  void aStoredCredentialOnAPullStillReachesTheRegistry() {
+    // docker sends stored Basic credentials on reads too once a host has any in its config. The
+    // registry ignores them (it carries no auth at all), but the gateway must neither let hybrid
+    // quarkus-oidc eat a non-Bearer Authorization on a public path nor challenge because of it —
+    // otherwise a host that ever logged in anywhere pulls differently than a clean one.
+    given()
+        .redirects()
+        .follow(false)
+        .header("Authorization", "Basic cWl0czp0b2tlbg==")
+        .when()
+        .get("/v2/qits/alpine/manifests/latest")
+        .then()
+        .statusCode(200)
+        .body(containsString("authorization=Basic cWl0czp0b2tlbg=="));
+  }
+
+  @Test
+  void aPushIsRefusedAtTheGatewayAndNeverReachesTheRegistry() {
+    // The registry carries no write guard of its own any more, so THIS refusal is its whole
+    // external write protection: /v2 is public for read methods only, and a write falls back to
+    // the session policy — a challenge no registry client can answer, which is the point (external
+    // push is unwanted entirely; producers dial the registry on qits-net). The body must not carry
+    // the stub upstream's echo: the request has to die here, not there.
     given()
         .redirects()
         .follow(false)
@@ -67,22 +84,20 @@ class GatewayAuthTest {
         .when()
         .post("/v2/qits/alpine/blobs/uploads/")
         .then()
-        .statusCode(200)
-        .body(containsString("authorization=Basic cWl0czp0b2tlbg=="));
-  }
+        .statusCode(401)
+        .body(not(containsString("authorization=")));
 
-  @Test
-  void anAnonymousPushReachesTheRegistrySoItCanChallengeIt() {
-    // The write side is public AT THIS LAYER on purpose. An unauthenticated push has to reach
-    // qits-artifacts to be answered 401 + WWW-Authenticate: Basic; a challenge issued here instead
-    // would be a 302 no registry client can follow.
+    // A bare anonymous push gets the mechanism's redirect default instead (no Authorization, none
+    // of the non-navigation signals) — a 302 into the IdP's HTML login, which no registry client
+    // can follow. A different dead end, the same refusal.
     given()
         .redirects()
         .follow(false)
         .when()
         .post("/v2/qits/alpine/blobs/uploads/")
         .then()
-        .statusCode(200);
+        .statusCode(302)
+        .body(not(containsString("authorization=")));
   }
 
   @Test

@@ -171,12 +171,11 @@ exchanges pass through here).
   request. This matters when something still fronts the gateway. Extend that list per deployment;
   **never** shrink it below what whatever sits in front of the gateway injects.
 - **`Authorization` is forwarded verbatim on an ordinary request.** It is neither reserved nor on the
-  strip list, and that is load-bearing rather than incidental: the OCI registry's write guard lives
-  in qits-artifacts, and a push credential (`skopeo --dest-creds`, `podman push --creds`) is an HTTP
-  Basic header that has to survive this hop intact. **Adding `Authorization` to
-  `qits.gateway.forwarded.strip-request-headers` breaks every authenticated image push**, with no
-  error here to say why. Note the deliberate asymmetry with the WebSocket rule below, which drops it:
-  a handshake is a protocol negotiation, not a request an upstream answers.
+  strip list. Less load-bearing than it used to be — the OCI registry no longer carries a write
+  guard, so no push credential depends on surviving this hop — but a docker with stored credentials
+  sends a Basic header on *pulls* too, and it must neither be eaten nor turned into a challenge on a
+  public path. Note the deliberate asymmetry with the WebSocket rule below, which drops it: a
+  handshake is a protocol negotiation, not a request an upstream answers.
 - **`X-Forwarded-For` is set, not appended** — the gateway is the outermost hop, so any inbound value
   is client-supplied and worthless.
 - **A WebSocket handshake forwards an allow-list, not everything-minus-the-prefix.** Only the RFC
@@ -231,16 +230,17 @@ expires:
   `/observability/api/otel/*`, `/ci/api/events/*`, `/workspaces/daemon/*`, `/projects/mcp`, …) —
   permanent, and identical to the address the service serves on `qits-net` because forwarding is
   verbatim;
-- **`/v2/*`** — the OCI registry, and the one entry that is not segment-prefixed, because the client
-  hardcodes the root. Both directions are public here and both are deliberate. Pulls are anonymous by
-  design: image names are meant to be *shared*, and are guessable on purpose, which is why
-  `/v2/_catalog` stays unimplemented and the posture stays private-network rather than capability-URL
-  the way the git host is. Pushes are public *at this layer* so the write guard can be
-  qits-artifacts' own — an unauthenticated push has to reach the service to be answered `401` +
-  `WWW-Authenticate: Basic`. Challenging here instead would mean a 302 into the IdP: a registry
-  client sends no `Sec-Fetch-Mode`, no `X-Requested-With` and no `Accept: text/event-stream`, so
-  `NonNavigationRequestChecker` keeps the redirect default, and an HTML login page is not something
-  docker can follow;
+- **`/v2/*`** — the OCI registry, and doubly exceptional: not segment-prefixed (the client
+  hardcodes the root), and the one entry that is public for **read methods only** (`GET`/`HEAD`).
+  Pulls are anonymous by design: image names are meant to be *shared*, and are guessable on
+  purpose, which is why `/v2/_catalog` stays unimplemented and the posture stays private-network
+  rather than capability-URL the way the git host is. Writes fall back to the session policy, and
+  that refusal is the registry's **whole** external write protection: qits-artifacts carries no
+  push guard of its own (producers dial it on `qits-net`, where callers are trusted), so an
+  internet `docker push` must die here — on a challenge no registry client can answer, which is
+  the point, because external push is unwanted entirely. Widening `/v2` back to all methods
+  without restoring a guard in qits-artifacts opens push to the world; `PublicPathsTest` and
+  `GatewayAuthTest` both hold that line;
 There used to be a third group: the monolith-relative forms (`/git/*`, `/api/otel/*`, `/mcp/*`, …),
 which were public because the `/` catch-all's upstream served them. They went with the catch-all.
 Those paths now name no upstream, so they are neither routed nor public — `PublicPathsTest` asserts

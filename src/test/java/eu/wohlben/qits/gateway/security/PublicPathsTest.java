@@ -26,10 +26,10 @@ class PublicPathsTest {
 
     @Test
     void healthAndFrameworkPathsArePublic() {
-      assertTrue(PublicPaths.isPublic("/q"));
-      assertTrue(PublicPaths.isPublic("/q/health"));
-      assertTrue(PublicPaths.isPublic("/q/health/ready"));
-      assertFalse(PublicPaths.isPublic("/qq")); // prefix must not bleed past the segment
+      assertTrue(PublicPaths.isPublic("GET", "/q"));
+      assertTrue(PublicPaths.isPublic("GET", "/q/health"));
+      assertTrue(PublicPaths.isPublic("GET", "/q/health/ready"));
+      assertFalse(PublicPaths.isPublic("GET", "/qq")); // prefix must not bleed past the segment
     }
 
     @Test
@@ -38,23 +38,23 @@ class PublicPathsTest {
       // callers that MUST reach it (container healthchecks, orchestrator probes) dial the service
       // directly on qits-net and never traverse the gateway, so what is exposed here is swagger-ui,
       // the OpenAPI document and deployment detail — for humans, who have a session.
-      assertFalse(PublicPaths.isPublic("/observability/q/openapi"));
-      assertFalse(PublicPaths.isPublic("/observability/q/swagger-ui"));
-      assertFalse(PublicPaths.isPublic("/ci/q/health/ready"));
-      assertFalse(PublicPaths.isPublic("/workspaces/q"));
+      assertFalse(PublicPaths.isPublic("GET", "/observability/q/openapi"));
+      assertFalse(PublicPaths.isPublic("GET", "/observability/q/swagger-ui"));
+      assertFalse(PublicPaths.isPublic("GET", "/ci/q/health/ready"));
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/q"));
     }
 
     @Test
     void configRelayIsPublicExactlyNotAsPrefix() {
-      assertTrue(PublicPaths.isPublic("/api/config.json"));
-      assertFalse(PublicPaths.isPublic("/api/config.json/extra"));
-      assertFalse(PublicPaths.isPublic("/api/config"));
+      assertTrue(PublicPaths.isPublic("GET", "/api/config.json"));
+      assertFalse(PublicPaths.isPublic("GET", "/api/config.json/extra"));
+      assertFalse(PublicPaths.isPublic("GET", "/api/config"));
     }
 
     @Test
     void authEndpointsArePublic() {
-      assertTrue(PublicPaths.isPublic("/api/auth/me"));
-      assertTrue(PublicPaths.isPublic("/api/auth/logout"));
+      assertTrue(PublicPaths.isPublic("GET", "/api/auth/me"));
+      assertTrue(PublicPaths.isPublic("GET", "/api/auth/logout"));
     }
   }
 
@@ -63,43 +63,63 @@ class PublicPathsTest {
 
     @Test
     void theGitHostSubtreeIsPublicUnderTheArtifactsSegment() {
-      assertTrue(PublicPaths.isPublic("/artifacts/git/abc-123/info/refs"));
-      assertTrue(PublicPaths.isPublic("/artifacts/git/proj-1/repo/git-receive-pack"));
-      assertFalse(PublicPaths.isPublic("/artifacts/git")); // only the subtree, not the bare path
-      assertFalse(PublicPaths.isPublic("/artifacts/gitignore")); // prefix must not bleed
+      assertTrue(PublicPaths.isPublic("GET", "/artifacts/git/abc-123/info/refs"));
+      assertTrue(PublicPaths.isPublic("GET", "/artifacts/git/proj-1/repo/git-receive-pack"));
+      assertFalse(
+          PublicPaths.isPublic("GET", "/artifacts/git")); // only the subtree, not the bare path
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/gitignore")); // prefix must not bleed
     }
 
     @Test
-    void theRegistryRootIsPublicAndIsTheOneNonSegmentPrefixedEntry() {
-      // docker's version probe, in both the spellings a client actually sends.
-      assertTrue(PublicPaths.isPublic("/v2"));
-      assertTrue(PublicPaths.isPublic("/v2/"));
-      assertTrue(PublicPaths.isPublic("/v2/qits/alpine/manifests/latest"));
-      assertTrue(PublicPaths.isPublic("/v2/qits/alpine/blobs/uploads/"));
+    void theRegistryIsPublicForReadsAndIsTheOneNonSegmentPrefixedEntry() {
+      // docker's version probe, in both the spellings a client actually sends, plus a pull's two
+      // methods — the whole anonymous-pull surface.
+      assertTrue(PublicPaths.isPublic("GET", "/v2"));
+      assertTrue(PublicPaths.isPublic("GET", "/v2/"));
+      assertTrue(PublicPaths.isPublic("GET", "/v2/qits/alpine/manifests/latest"));
+      assertTrue(PublicPaths.isPublic("HEAD", "/v2/qits/alpine/manifests/latest"));
       // A multi-slash OCI name is still one path under the same root.
       assertTrue(
-          PublicPaths.isPublic("/v2/qits/build-images/ci-base/blobs/sha256:" + "0".repeat(64)));
+          PublicPaths.isPublic(
+              "GET", "/v2/qits/build-images/ci-base/blobs/sha256:" + "0".repeat(64)));
 
-      assertFalse(PublicPaths.isPublic("/v2x")); // prefix must not bleed
-      assertFalse(PublicPaths.isPublic("/v20/x"));
+      assertFalse(PublicPaths.isPublic("GET", "/v2x")); // prefix must not bleed
+      assertFalse(PublicPaths.isPublic("GET", "/v20/x"));
 
       // The registry has exactly ONE address. A prefixed spelling is not a second one, and must not
       // become public just by looking as though it belongs to artifacts.
-      assertFalse(PublicPaths.isPublic("/artifacts/v2"));
-      assertFalse(PublicPaths.isPublic("/artifacts/v2/qits/alpine/manifests/latest"));
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/v2"));
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/v2/qits/alpine/manifests/latest"));
+    }
+
+    @Test
+    void registryWritesAreNotPublicAndThatIsTheRegistrysWholeExternalWriteProtection() {
+      // qits-artifacts carries NO push guard of its own any more (producers on qits-net are
+      // trusted; external push is unwanted entirely), so these lines are what stands between the
+      // internet and `docker push`. An anonymous write is challenged for a session no registry
+      // client can answer — deliberately nonfunctional. Widening /v2 back to all methods without
+      // restoring a guard in qits-artifacts opens push to the world; the two move together.
+      assertFalse(PublicPaths.isPublic("POST", "/v2/qits/alpine/blobs/uploads/"));
+      assertFalse(PublicPaths.isPublic("PATCH", "/v2/qits/alpine/blobs/uploads/session-1"));
+      assertFalse(PublicPaths.isPublic("PUT", "/v2/qits/alpine/manifests/latest"));
+      assertFalse(PublicPaths.isPublic("DELETE", "/v2/qits/alpine/manifests/latest"));
+      // The probe itself is also read-only territory.
+      assertFalse(PublicPaths.isPublic("POST", "/v2"));
+      assertFalse(PublicPaths.isPublic("POST", "/v2/"));
     }
 
     @Test
     void theBlobStoreIsPublicUnderTheArtifactsSegment() {
       // Token-free at the session-policy layer — CI uploaders hold no session; writes are guarded
       // by the static-token filter in the service, reads must work as a plain <img> src.
-      assertTrue(PublicPaths.isPublic("/artifacts/api"));
-      assertTrue(PublicPaths.isPublic("/artifacts/api/repositories/ci-screenshots/blobs"));
+      assertTrue(PublicPaths.isPublic("GET", "/artifacts/api"));
+      assertTrue(PublicPaths.isPublic("GET", "/artifacts/api/repositories/ci-screenshots/blobs"));
       assertTrue(
           PublicPaths.isPublic(
+              "GET",
               "/artifacts/api/repositories/ci-screenshots/blobs/"
                   + "0000000000000000000000000000000000000000000000000000000000000000"));
-      assertFalse(PublicPaths.isPublic("/artifacts/apiary")); // prefix must not bleed
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/apiary")); // prefix must not bleed
     }
 
     @Test
@@ -107,14 +127,15 @@ class PublicPathsTest {
       // The intake is token-free at the session-policy layer (the git host's post-receive hook
       // holds no session, and after extraction is another process) and guarded by the static-token
       // filter in the service.
-      assertTrue(PublicPaths.isPublic("/ci/api/events/post-receive"));
+      assertTrue(PublicPaths.isPublic("GET", "/ci/api/events/post-receive"));
       // Run READS are not public: step output is the build log of a possibly private repository,
       // and repo ids are handed to containers/clone urls, so anonymous reads would leak them.
-      assertFalse(PublicPaths.isPublic("/ci/api/runs"));
-      assertFalse(PublicPaths.isPublic("/ci/api/runs/run-1"));
-      assertFalse(PublicPaths.isPublic("/ci/api"));
-      assertFalse(PublicPaths.isPublic("/ci/api/events")); // only the subtree, not the bare path
-      assertFalse(PublicPaths.isPublic("/cinema/api/events/x")); // prefix must not bleed
+      assertFalse(PublicPaths.isPublic("GET", "/ci/api/runs"));
+      assertFalse(PublicPaths.isPublic("GET", "/ci/api/runs/run-1"));
+      assertFalse(PublicPaths.isPublic("GET", "/ci/api"));
+      assertFalse(
+          PublicPaths.isPublic("GET", "/ci/api/events")); // only the subtree, not the bare path
+      assertFalse(PublicPaths.isPublic("GET", "/cinema/api/events/x")); // prefix must not bleed
     }
 
     @Test
@@ -124,59 +145,59 @@ class PublicPathsTest {
       // session-free front-door spelling — and correspondingly no token guard in the service.
       // Allowlisting it here without restoring that guard would open the intake to the internet;
       // this test is what makes that a conscious pair of changes.
-      assertFalse(PublicPaths.isPublic("/cd/api/events/build-succeeded"));
-      assertFalse(PublicPaths.isPublic("/cd/api/environments"));
-      assertFalse(PublicPaths.isPublic("/cd/api/deployments"));
-      assertFalse(PublicPaths.isPublic("/cd/api"));
+      assertFalse(PublicPaths.isPublic("GET", "/cd/api/events/build-succeeded"));
+      assertFalse(PublicPaths.isPublic("GET", "/cd/api/environments"));
+      assertFalse(PublicPaths.isPublic("GET", "/cd/api/deployments"));
+      assertFalse(PublicPaths.isPublic("GET", "/cd/api"));
     }
 
     @Test
     void otlpIngestIsPublicUnderTheObservabilitySegment() {
-      assertTrue(PublicPaths.isPublic("/observability/api/otel/v1/traces"));
-      assertTrue(PublicPaths.isPublic("/observability/api/otel/v1/logs"));
-      assertTrue(PublicPaths.isPublic("/observability/api/otel/v1/metrics"));
+      assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/traces"));
+      assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/logs"));
+      assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/metrics"));
       // Telemetry READS sit under the same rest path and are not public.
-      assertFalse(PublicPaths.isPublic("/observability/api/telemetry/logs"));
-      assertFalse(PublicPaths.isPublic("/observability/api/otel")); // subtree only
+      assertFalse(PublicPaths.isPublic("GET", "/observability/api/telemetry/logs"));
+      assertFalse(PublicPaths.isPublic("GET", "/observability/api/otel")); // subtree only
     }
 
     @Test
     void eachMcpServerIsPublicAtExactlyItsOwnPath() {
       // One path per service, not the old /mcp/<server> family: observability's server was renamed
       // off `repository`, which is what collapsed the family and let the allowlist tighten.
-      assertTrue(PublicPaths.isPublic("/observability/mcp"));
-      assertTrue(PublicPaths.isPublic("/projects/mcp"));
+      assertTrue(PublicPaths.isPublic("GET", "/observability/mcp"));
+      assertTrue(PublicPaths.isPublic("GET", "/projects/mcp"));
       // Deliberately NOT the subtree. quarkus-mcp-server-http mounts the legacy SSE transport at
       // <root>/sse; the daemon dials these with streamable HTTP (the root itself), so nothing we
       // ship needs it. If an SSE-transport client ever appears, this assertion is where it lands.
-      assertFalse(PublicPaths.isPublic("/observability/mcp/sse"));
-      assertFalse(PublicPaths.isPublic("/projects/mcp/repository"));
-      assertFalse(PublicPaths.isPublic("/projects/mcpx")); // prefix must not bleed
+      assertFalse(PublicPaths.isPublic("GET", "/observability/mcp/sse"));
+      assertFalse(PublicPaths.isPublic("GET", "/projects/mcp/repository"));
+      assertFalse(PublicPaths.isPublic("GET", "/projects/mcpx")); // prefix must not bleed
     }
 
     @Test
     void theDaemonControlSocketIsPublicUnderTheWorkspacesSegment() {
-      assertTrue(PublicPaths.isPublic("/workspaces/daemon/42"));
-      assertFalse(PublicPaths.isPublic("/workspaces/daemon")); // only the subtree
+      assertTrue(PublicPaths.isPublic("GET", "/workspaces/daemon/42"));
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/daemon")); // only the subtree
     }
 
     @Test
     void captureIsPublicExactlyNotAsPrefix() {
-      assertTrue(PublicPaths.isPublic("/workspaces/api/capture"));
-      assertFalse(PublicPaths.isPublic("/workspaces/api/captures"));
-      assertFalse(PublicPaths.isPublic("/workspaces/api/capture/extra"));
+      assertTrue(PublicPaths.isPublic("GET", "/workspaces/api/capture"));
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/api/captures"));
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/api/capture/extra"));
     }
 
     @Test
     void theRestOfEachServicesSurfaceIsProtected() {
-      assertFalse(PublicPaths.isPublic("/projects/api/projects"));
-      assertFalse(PublicPaths.isPublic("/projects/api/repositories/r1/remote-login"));
-      assertFalse(PublicPaths.isPublic("/workspaces/api/workspaces/1/events"));
-      assertFalse(PublicPaths.isPublic("/workspaces/service/1/d1/")); // dev-server proxy
-      assertFalse(PublicPaths.isPublic("/stt/api/transcriptions"));
+      assertFalse(PublicPaths.isPublic("GET", "/projects/api/projects"));
+      assertFalse(PublicPaths.isPublic("GET", "/projects/api/repositories/r1/remote-login"));
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/api/workspaces/1/events"));
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/service/1/d1/")); // dev-server proxy
+      assertFalse(PublicPaths.isPublic("GET", "/stt/api/transcriptions"));
       // The bare rest-path root of a service is public only where the whole API is (artifacts).
-      assertFalse(PublicPaths.isPublic("/observability/api"));
-      assertFalse(PublicPaths.isPublic("/projects/api"));
+      assertFalse(PublicPaths.isPublic("GET", "/observability/api"));
+      assertFalse(PublicPaths.isPublic("GET", "/projects/api"));
     }
   }
 
@@ -192,45 +213,45 @@ class PublicPathsTest {
 
     @Test
     void containerFacingPathsAreNoLongerPublic() {
-      assertFalse(PublicPaths.isPublic("/git/abc-123/info/refs"));
-      assertFalse(PublicPaths.isPublic("/mcp"));
-      assertFalse(PublicPaths.isPublic("/mcp/repository"));
-      assertFalse(PublicPaths.isPublic("/api/workspace-daemon/w1"));
-      assertFalse(PublicPaths.isPublic("/api/otel/v1/traces"));
-      assertFalse(PublicPaths.isPublic("/api/capture"));
+      assertFalse(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
+      assertFalse(PublicPaths.isPublic("GET", "/mcp"));
+      assertFalse(PublicPaths.isPublic("GET", "/mcp/repository"));
+      assertFalse(PublicPaths.isPublic("GET", "/api/workspace-daemon/w1"));
+      assertFalse(PublicPaths.isPublic("GET", "/api/otel/v1/traces"));
+      assertFalse(PublicPaths.isPublic("GET", "/api/capture"));
     }
 
     @Test
     void theOldArtifactAndCiSpellingsAreNoLongerPublic() {
-      assertFalse(PublicPaths.isPublic("/api/artifacts"));
-      assertFalse(PublicPaths.isPublic("/api/artifacts/repositories/ci-screenshots/blobs"));
-      assertFalse(PublicPaths.isPublic("/api/ci/events/post-receive"));
+      assertFalse(PublicPaths.isPublic("GET", "/api/artifacts"));
+      assertFalse(PublicPaths.isPublic("GET", "/api/artifacts/repositories/ci-screenshots/blobs"));
+      assertFalse(PublicPaths.isPublic("GET", "/api/ci/events/post-receive"));
     }
 
     /** The segment-prefixed forms are the live ones, and stay public. */
     @Test
     void theSegmentPrefixedFormsStillAre() {
-      assertTrue(PublicPaths.isPublic("/artifacts/git/abc-123/info/refs"));
-      assertTrue(PublicPaths.isPublic("/artifacts/api/repositories/ci-screenshots/blobs"));
-      assertTrue(PublicPaths.isPublic("/observability/api/otel/v1/traces"));
-      assertTrue(PublicPaths.isPublic("/observability/mcp"));
-      assertTrue(PublicPaths.isPublic("/projects/mcp"));
-      assertTrue(PublicPaths.isPublic("/workspaces/daemon/w1"));
-      assertTrue(PublicPaths.isPublic("/workspaces/api/capture"));
-      assertTrue(PublicPaths.isPublic("/ci/api/events/post-receive"));
+      assertTrue(PublicPaths.isPublic("GET", "/artifacts/git/abc-123/info/refs"));
+      assertTrue(PublicPaths.isPublic("GET", "/artifacts/api/repositories/ci-screenshots/blobs"));
+      assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/traces"));
+      assertTrue(PublicPaths.isPublic("GET", "/observability/mcp"));
+      assertTrue(PublicPaths.isPublic("GET", "/projects/mcp"));
+      assertTrue(PublicPaths.isPublic("GET", "/workspaces/daemon/w1"));
+      assertTrue(PublicPaths.isPublic("GET", "/workspaces/api/capture"));
+      assertTrue(PublicPaths.isPublic("GET", "/ci/api/events/post-receive"));
     }
   }
 
   @Test
   void uiSurfaceIsProtected() {
-    assertFalse(PublicPaths.isPublic("/"));
-    assertFalse(PublicPaths.isPublic("/index.html"));
-    assertFalse(PublicPaths.isPublic("/api/projects"));
-    assertFalse(PublicPaths.isPublic("/api/repositories/r1/workspaces/w1/events"));
-    assertFalse(PublicPaths.isPublic("/api/terminal/commands/c1"));
+    assertFalse(PublicPaths.isPublic("GET", "/"));
+    assertFalse(PublicPaths.isPublic("GET", "/index.html"));
+    assertFalse(PublicPaths.isPublic("GET", "/api/projects"));
+    assertFalse(PublicPaths.isPublic("GET", "/api/repositories/r1/workspaces/w1/events"));
+    assertFalse(PublicPaths.isPublic("GET", "/api/terminal/commands/c1"));
     // The retired agent-session hook endpoint is no longer public (agent-activity tracking moved it
     // to the workspace-daemon's in-container loopback webhook).
-    assertFalse(PublicPaths.isPublic("/api/commands/abc-123/agent-session"));
-    assertFalse(PublicPaths.isPublic("/service/w1/d1/"));
+    assertFalse(PublicPaths.isPublic("GET", "/api/commands/abc-123/agent-session"));
+    assertFalse(PublicPaths.isPublic("GET", "/service/w1/d1/"));
   }
 }
