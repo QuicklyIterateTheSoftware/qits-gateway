@@ -118,6 +118,20 @@ class PublicPathsTest {
     }
 
     @Test
+    void onlyTheCdBuildIntakeIsPublic() {
+      // The same shape one hop down: qits-ci's CdBuildNotifier holds no session, and the intake is
+      // guarded by the static qits.cd.token in the service.
+      assertTrue(PublicPaths.isPublic("/cd/api/events/build-succeeded"));
+      // The environment surface is not public — its machine callers stay on qits-net, and the
+      // listing of what runs where is deployment detail.
+      assertFalse(PublicPaths.isPublic("/cd/api/environments"));
+      assertFalse(PublicPaths.isPublic("/cd/api/deployments"));
+      assertFalse(PublicPaths.isPublic("/cd/api"));
+      assertFalse(PublicPaths.isPublic("/cd/api/events")); // only the subtree, not the bare path
+      assertFalse(PublicPaths.isPublic("/cdn/api/events/x")); // prefix must not bleed
+    }
+
+    @Test
     void otlpIngestIsPublicUnderTheObservabilitySegment() {
       assertTrue(PublicPaths.isPublic("/observability/api/otel/v1/traces"));
       assertTrue(PublicPaths.isPublic("/observability/api/otel/v1/logs"));
