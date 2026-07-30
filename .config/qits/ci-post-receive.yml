@@ -1,20 +1,67 @@
 # The pipeline qits-ci runs on every push to a tracked branch of this repository.
 #
-# One step: build this repo's docker/Dockerfile and publish it under the tag that is the whole
-# contract with qits-cd — <registry>/<repository>/<this repo's name>:<sha>. The step's own
-# container only drives the docker CLI; the build and the push happen in the host's daemon
-# through the socket this step declares (docker: true). A failed push is a failed step is a
-# FAILED run.
+# One step, two halves, and the split between them is the whole point:
+#
+#   1. build the landing SPA (src/main/webui = the qits-spa-home submodule) HERE, in the step
+#      container, which sits on qits-net and can therefore reach the platform's own npm registry —
+#      where @qits/angular and @qits/ui-components live and where nothing else can reach them from;
+#   2. build this repo's docker/Dockerfile, whose builder stage packages that already-built bundle
+#      and never runs an install.
+#
+# A RUN step inside a docker build reaches the public internet but reaches the platform registry by
+# no address at all (not the qits-net alias, not localhost:8081, not host.docker.internal). That is
+# why the halves are split, and it is why this step's image is node-docker-base rather than ci-base:
+# it needs node, pnpm and git for half one and the docker CLI for half two.
+#
+# Publish it under the tag that is the whole contract with qits-cd —
+# <registry>/<repository>/<this repo's name>:<sha>. The step's own container only drives the docker
+# CLI; the build and the push happen in the host's daemon through the socket this step declares
+# (docker: true). A failed push is a failed step is a FAILED run.
 #
 # QITS_VARIANT=local: this pipeline publishes the UNAUTHENTICATED gateway, on purpose — the
 # platform this flow feeds is a workstation's own, its registry local, its port loopback-bound,
 # and every request already arrives as the one trusted user. A deployment that fronts anything
 # beyond one machine builds the oauth variant instead and must not consume this image.
 steps:
-  - image: qits/build-images/ci-base:latest
+  - image: qits/build-images/node-docker-base:latest
     docker: true
     timeout-seconds: 3600
     script: |
+      # The daemon runs this with `bash -c` and no -e, so without this an early failure would be
+      # swallowed by the next command's exit code. -u is load-bearing too: an unset registry var
+      # must stop the step, not quietly resolve the @qits scope against npmjs.org, where these
+      # packages do not exist and never will.
+      set -eu
+
+      # The daemon's clone does not recurse, so the gitlink at src/main/webui is an empty directory
+      # — which Quinoa treats as a misconfiguration rather than "no client", and the image build
+      # would stop at "No package.json found in Web UI directory".
+      #
+      # .gitmodules names the canonical GitHub URL, and qits-spa-home's commits are not on GitHub
+      # yet; they are on the platform's own git host. insteadOf redirects the fetch without editing
+      # the tracked file, so the working tree stays exactly as it was pushed and the canonical URL
+      # keeps being the thing a public clone would use. Drop these two lines the day the commits are
+      # on GitHub.
+      git config url."http://qits-artifacts:8080/artifacts/git/qits-spa-home".insteadOf \
+          "https://github.com/QuicklyIterateTheSoftware/qits-spa-home.git"
+      git submodule update --init src/main/webui
+
+      # ENVIRONMENT, not a file. qits-spa-home COMMITS an .npmrc (localhost:8081, right for a
+      # developer on the deployment host), and npm and pnpm rank a project .npmrc ABOVE ~/.npmrc —
+      # so the `cat > ~/.npmrc` preamble the library repos use would be written and silently
+      # ignored. `npm_config_*` environment outranks both files, so it wins without touching the
+      # tree.
+      cd src/main/webui
+      env npm_config_registry="$QITS_NPM_PROXY_URL" \
+          "npm_config_@qits:registry=$QITS_NPM_REGISTRY_URL" \
+          pnpm install --frozen-lockfile
+
+      # dist/qits-spa-home/browser — the bundle the image build consumes, and the ONE artifact this
+      # half exists to produce. Lint and test are qits-spa-home's own pipeline's job; repeating them
+      # here would only make this repo red for someone else's commit.
+      pnpm build
+      cd -
+
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-gateway:$QITS_CI_SHA"
       docker build -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=local .
       docker push "$ref"
