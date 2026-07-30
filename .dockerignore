@@ -5,13 +5,31 @@
 # silent. This file is what makes that affordable — it drops everything the build does not read, so
 # adding a top-level entry stays free and no stale output leaks in.
 
-.git
+# `**/.git` rather than `.git`: src/main/webui is a submodule, so it carries a .git FILE of its own
+# pointing back into ../../../.git/modules. Neither is readable from the build stage and neither is
+# read by it.
+**/.git
 .gitignore
 
 # Maven / Quarkus build output — regenerated inside the build stage, and ~86 MB of it here. Copying
 # it in would also risk a stale target/ shadowing what the stage compiles.
 **/target
 **/target-ide
+
+# Node's install output, and the one entry here that is about SIZE: a pnpm node_modules for an
+# Angular 21 workspace is hundreds of megabytes of symlink farm, and nothing in the build stage
+# reads it — the stage runs no install and no client build (see docker/Dockerfile).
+#
+# NOTE THE ASYMMETRY with the platform's Quinoa recipe, which excludes the client's dist/ as well:
+# here dist/ is the PAYLOAD. It is the bundle the pipeline step built where the platform's npm
+# registry is reachable, it is the only form of the SPA this image can be given, and excluding it
+# would fail the build at Quinoa's build-dir check.
+src/main/webui/node_modules
+src/main/webui/.angular
+
+# Quinoa's own toolchain install directory. The build stage creates its own; a host-installed one
+# would be a Linux/glibc question we do not want to import from whatever built the context.
+.quinoa
 
 # Local env / IDE cruft
 .env

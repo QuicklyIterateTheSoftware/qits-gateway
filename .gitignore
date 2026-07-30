@@ -2,6 +2,10 @@
 target/
 target-ide/
 
+# Quinoa's package-manager-install directory (the node/pnpm it provisions when a build asks it to).
+# The image build is the only thing here that asks; this keeps a stray local one out of the tree.
+.quinoa/
+
 # IDE
 .vscode/
 .idea/
