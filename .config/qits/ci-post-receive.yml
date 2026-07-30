@@ -11,7 +11,7 @@
 # A RUN step inside a docker build reaches the public internet but reaches the platform registry by
 # no address at all (not the qits-net alias, not localhost:8081, not host.docker.internal). That is
 # why the halves are split, and it is why this step's image is node-docker-base rather than ci-base:
-# it needs node, pnpm and git for half one and the docker CLI for half two.
+# it needs node, npm and git for half one and the docker CLI for half two.
 #
 # Publish it under the tag that is the whole contract with qits-cd —
 # <registry>/<repository>/<this repo's name>:<sha>. The step's own container only drives the docker
@@ -46,20 +46,22 @@ steps:
           "https://github.com/QuicklyIterateTheSoftware/qits-spa-home.git"
       git submodule update --init src/main/webui
 
-      # ENVIRONMENT, not a file. qits-spa-home COMMITS an .npmrc (localhost:8081, right for a
-      # developer on the deployment host), and npm and pnpm rank a project .npmrc ABOVE ~/.npmrc —
-      # so the `cat > ~/.npmrc` preamble the library repos use would be written and silently
-      # ignored. `npm_config_*` environment outranks both files, so it wins without touching the
-      # tree.
+      # npm lockfiles pin full resolved URLs, and qits-spa-home's is generated on the deployment
+      # host, so every entry names http://localhost:8081 — unreachable from this container, where
+      # the same service is http://qits-artifacts:8080. The paths are identical on both addresses,
+      # so a pure host swap in this step's own fresh checkout makes the lockfile resolvable, and
+      # `npm ci` then needs no registry configuration at all: the rewritten URLs carry everything.
+      # (npm's --replace-registry-host=always cannot do this — it substitutes the configured
+      # registry's URL including its path while keeping the resolved path too, which against this
+      # platform's path-mounted registries yields /artifacts/npm/npmjs/artifacts/npm/npm/… and 404.)
       cd src/main/webui
-      env npm_config_registry="$QITS_NPM_PROXY_URL" \
-          "npm_config_@qits:registry=$QITS_NPM_REGISTRY_URL" \
-          pnpm install --frozen-lockfile
+      sed -i 's|http://localhost:8081/|http://qits-artifacts:8080/|g' package-lock.json
+      npm ci --no-audit --no-fund
 
       # dist/qits-spa-home/browser — the bundle the image build consumes, and the ONE artifact this
       # half exists to produce. Lint and test are qits-spa-home's own pipeline's job; repeating them
       # here would only make this repo red for someone else's commit.
-      pnpm build
+      npm run build
       cd -
 
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-gateway:$QITS_CI_SHA"

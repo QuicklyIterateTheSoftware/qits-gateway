@@ -15,7 +15,7 @@
 # Build from the repo root:
 #
 #     git submodule update --init src/main/webui
-#     (cd src/main/webui && pnpm install --frozen-lockfile && pnpm build)
+#     (cd src/main/webui && npm ci && npm run build)
 #     docker build -t qits/gateway:latest --build-arg QITS_VARIANT=oauth -f docker/Dockerfile .
 #
 # The first two lines are not optional and are not a convenience: this image carries the landing SPA
@@ -62,7 +62,7 @@ ARG QITS_VARIANT
 # package-manager-install: the Mandrel builder image ships no node at all, so this stage installs
 # its own — from nodejs.org and registry.npmjs.org, both of which a docker build can reach. Pinned,
 # so the image build is reproducible, and pinned to what the pipeline's own step container carries
-# (node 24.18.0) and to the `packageManager` field of src/main/webui (pnpm 10.33.0). It lives here
+# (node 24.18.0, whose bundled npm is the package manager — src/main/webui pins none). It lives here
 # rather than in application.properties on purpose: a local or CI `mvnw` build must use the node on
 # PATH, so that no build silently downloads a toolchain.
 #
@@ -84,7 +84,7 @@ ARG QITS_VARIANT
 #
 # THIS DOES NOT FAIL QUIETLY. The `test -f` below stops a context with no bundle before the
 # multi-minute native compile, and Quinoa's own build-dir check would stop it after. A forgotten
-# `pnpm build` in the step is a red build, not a gateway that ships without its landing page.
+# `npm run build` in the step is a red build, not a gateway that ships without its landing page.
 #
 # --- and why the bundle is copied onto itself first ----------------------------------------------
 # Quinoa does not copy build-dir into target/quinoa/build, it MOVES it, and overlayfs cannot rename
@@ -99,7 +99,7 @@ ARG QITS_VARIANT
 RUN d=src/main/webui/dist/qits-spa-home/browser; \
     test -f "$d/index.html" || { \
       echo "No built landing SPA at $d." >&2; \
-      echo "The build context must carry one: run 'pnpm install --frozen-lockfile && pnpm build'" >&2; \
+      echo "The build context must carry one: run 'npm ci && npm run build'" >&2; \
       echo "in src/main/webui first — this stage cannot, see the Quinoa flags above." >&2; \
       exit 1; }; \
     cp -a "$d" "$d.layer" && rm -rf "$d" && mv "$d.layer" "$d" && \
@@ -107,7 +107,6 @@ RUN d=src/main/webui/dist/qits-spa-home/browser; \
       -Dqits.variant=${QITS_VARIANT} -Dquarkus.native.native-image-xmx=4g \
       -Dquarkus.quinoa.package-manager-install=true \
       -Dquarkus.quinoa.package-manager-install.node-version=24.18.0 \
-      -Dquarkus.quinoa.package-manager-install.pnpm-version=10.33.0 \
       -Dquarkus.quinoa.package-manager-command.install=--version \
       -Dquarkus.quinoa.package-manager-command.ci=--version \
       -Dquarkus.quinoa.package-manager-command.build=--version

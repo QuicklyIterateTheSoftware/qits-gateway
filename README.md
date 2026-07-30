@@ -146,15 +146,15 @@ may happen:
 
 | Context | Reaches the platform registry | What it does |
 | --- | --- | --- |
-| a developer on the deployment host | yes (`localhost:8081`, via the submodule's committed `.npmrc`) | Quinoa runs the real `pnpm install --frozen-lockfile` and `pnpm run build`, with the node on `PATH` |
+| a developer on the deployment host | yes (`localhost:8081`, via the submodule's committed `.npmrc` and lockfile) | Quinoa runs the real `npm ci` and `npm run build`, with the node on `PATH` |
 | the CI step container | yes (on `qits-net`) | runs the install and the build itself, before the image build |
 | a `RUN` step in a docker build | **no** — not the qits-net alias, not `localhost:8081`, not `host.docker.internal` | packages the bundle the step already built; runs no install |
 
 The image build is therefore the deviation, and it is confined to one `RUN` in `docker/Dockerfile`:
-it provisions its own pinned node/pnpm (the Mandrel builder image ships none) and replaces Quinoa's
+it provisions its own pinned node (npm bundled; the Mandrel builder image ships none) and replaces Quinoa's
 install and build commands with `--version`, the null command. **It does not fail quietly:** the
 `RUN` first asserts the bundle is in the context — before the multi-minute native compile — and
-Quinoa's own `build-dir` check would stop it after. A forgotten `pnpm build` is a red build, never a
+Quinoa's own `build-dir` check would stop it after. A forgotten `npm run build` is a red build, never a
 gateway that ships without its landing page.
 
 That same `RUN` copies the bundle onto itself before invoking maven, which looks superstitious and
@@ -447,7 +447,7 @@ change to what this repo needs, so it is written down rather than left to a buil
 ```bash
 git submodule update --init src/main/webui
 (cd src/main/webui && git switch main)             # the platform's submodule convention
-(cd src/main/webui && pnpm install --frozen-lockfile)   # once; needs the platform's npm registry
+(cd src/main/webui && npm ci)                   # once; needs the platform's npm registry
 ```
 
 > **Until qits-spa-home's commits reach GitHub**, `.gitmodules`' canonical URL has nothing to fetch.
@@ -465,13 +465,14 @@ What each command needs after that:
 | Command | Submodule | node on `PATH` | Network |
 | --- | --- | --- | --- |
 | `./mvnw test` | no | no | no |
-| `./mvnw verify -Dqits.variant=oauth` | yes | yes | no, once `node_modules` is populated ᵇ |
-| `./mvnw package …` | yes | yes | no, same |
+| `./mvnw verify -Dqits.variant=oauth` | yes | yes | yes ᵇ |
+| `./mvnw package …` | yes | yes | yes, same |
 | `docker build …` | yes, plus a built `dist/` | no (the stage brings its own) | public internet only |
 
-ᵇ Quinoa runs `pnpm install --frozen-lockfile` (`quarkus.quinoa.ci=true` — a build of this repo must
-never rewrite a submodule's lockfile), and with `node_modules` already populated pnpm does no
-network I/O at all. The **suite** needs neither node nor the submodule in any case: Quinoa is off
+ᵇ Quinoa runs `npm ci` (`quarkus.quinoa.ci=true` — a build of this repo must never rewrite a
+submodule's lockfile), and `npm ci` deletes and reinstalls `node_modules` on every run — served
+from npm's local cache when it can be, from the registry when it cannot, so "reachable registry"
+is the honest requirement. The **suite** needs neither node nor the submodule in any case: Quinoa is off
 under `%test`, which is also why what the SPA is actually served as is proven on the packaged image
 and not by a `@QuarkusTest`.
 
@@ -484,7 +485,7 @@ than copying it, so a `./mvnw package` leaves the submodule's `dist/` emptied. H
 the next build regenerates it — but it is why the image build, which does *not* regenerate it, first
 re-materialises the bundle in its own layer.
 
-`quarkus:dev` changes too: Quinoa detects Angular, starts `pnpm start` as a dev service on :4200 and
+`quarkus:dev` changes too: Quinoa detects Angular, starts `npm start` as a dev service on :4200 and
 proxies to it, so dev mode live-reloads the SPA as well as the gateway — and needs `node_modules` to
 do it.
 
@@ -509,7 +510,7 @@ java -jar target/quarkus-app/quarkus-run.jar
 # Native container image. This is how the binary is SHIPPED, not how it is built: the stage brings
 # its own Mandrel builder, which is also the escape hatch on a machine with no GraalVM. The bundle
 # is NOT built by the stage — build it first, see "The landing SPA".
-(cd src/main/webui && pnpm build)
+(cd src/main/webui && npm run build)
 docker build -t qits/gateway:latest --build-arg QITS_VARIANT=oauth -f docker/Dockerfile .
 ```
 

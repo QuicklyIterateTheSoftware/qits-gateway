@@ -40,7 +40,7 @@ Key facts that shape every change here:
 
 ```bash
 git submodule update --init src/main/webui      # the landing SPA; package needs it, test does not
-(cd src/main/webui && pnpm install --frozen-lockfile)   # once; needs the platform's npm registry
+(cd src/main/webui && npm ci)                   # once; needs the platform's npm registry
 
 ./mvnw test                    # unit tests + the end-to-end proxy suite (no docker needed)
 ./mvnw package -Dqits.variant=oauth   # JVM build -> target/quarkus-app/ (the flag is required)
@@ -49,7 +49,7 @@ git submodule update --init src/main/webui      # the landing SPA; package needs
 ./mvnw package -Dnative -Dqits.variant=oauth   # native binary -> target/qits-gateway (no docker)
 ./mvnw test -Dtest=RouteTableTest
 
-(cd src/main/webui && pnpm build)   # REQUIRED before the image build: the builder stage packages
+(cd src/main/webui && npm run build)   # REQUIRED before the image build: the builder stage packages
 docker build -t qits/gateway:latest --build-arg QITS_VARIANT=oauth -f docker/Dockerfile .
 ```
 
