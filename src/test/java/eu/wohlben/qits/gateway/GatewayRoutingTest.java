@@ -131,6 +131,18 @@ class GatewayRoutingTest {
 
   @Test
   void unroutedPathsAreAnsweredLocallyWithoutConnectingAnywhere() {
+    // What this asserts, precisely: the GATEWAY opens no connection for a path no route claims and
+    // answers it itself. It does NOT assert what a user sees at that path in a packaged build, and
+    // the difference is worth stating rather than letting the test name imply otherwise.
+    //
+    // Quinoa is off for the whole suite (%test.quarkus.quinoa=false), so nothing is layered above
+    // this handler here. In a packaged gateway the landing SPA is: its fallback runs at route order
+    // 40_000, well ahead of this catch-all, so a GET to an unclaimed path is re-routed to
+    // index.html and never reaches this 404 at all. A non-GET still does — the SPA handler only
+    // claims GET/HEAD/OPTIONS — and so does any path in quarkus.quinoa.ignored-path-prefixes.
+    //
+    // That layering is why QuinoaIgnoredPathsTest exists, and why the SPA half of the contract is
+    // proven on the image rather than here.
     given()
         .when()
         .get("/nothing/here")
