@@ -60,11 +60,18 @@ ARG QITS_VARIANT
 # --- the Quinoa flags, and why they are HERE and not in application.properties -------------------
 #
 # package-manager-install: the Mandrel builder image ships no node at all, so this stage installs
-# its own — from nodejs.org and registry.npmjs.org, both of which a docker build can reach. Pinned,
-# so the image build is reproducible, and pinned to what the pipeline's own step container carries
-# (node 24.18.0, whose bundled npm is the package manager — src/main/webui pins none). It lives here
-# rather than in application.properties on purpose: a local or CI `mvnw` build must use the node on
-# PATH, so that no build silently downloads a toolchain.
+# its own — from nodejs.org and registry.npmjs.org, both of which a docker build can reach. It lives
+# here rather than in application.properties on purpose: a local or CI `mvnw` build must use the
+# node on PATH, so that no build silently downloads a toolchain.
+#
+# 22.22.0 is the PLATFORM pin (docs/project-setup-quinoa-angular.md in the qits monorepo) — the node
+# every other qits service's builder stage installs, and the version a developer's host carries.
+# Note it is deliberately NOT the step container's node: node-docker-base is node:24-alpine, and the
+# bundle this image consumes was built there. The two do not have to agree, because this stage does
+# not build the bundle — the commands below are neutered to `--version`, so the only thing node does
+# here is exist and prove its package manager runs. Matching the platform keeps the pin to one
+# number across the repos instead of tracking a base image nobody here chose. npm is node's own
+# bundled one; src/main/webui pins no package manager and needs none.
 #
 # The two command overrides are the load-bearing part, and the reason this repo deviates from the
 # platform's Quinoa recipe (docs/project-setup-quinoa-angular.md, which has the builder run the
@@ -106,7 +113,7 @@ RUN d=src/main/webui/dist/qits-spa-home/browser; \
     ./mvnw -B -ntp package -Dnative -DskipTests \
       -Dqits.variant=${QITS_VARIANT} -Dquarkus.native.native-image-xmx=4g \
       -Dquarkus.quinoa.package-manager-install=true \
-      -Dquarkus.quinoa.package-manager-install.node-version=24.18.0 \
+      -Dquarkus.quinoa.package-manager-install.node-version=22.22.0 \
       -Dquarkus.quinoa.package-manager-command.install=--version \
       -Dquarkus.quinoa.package-manager-command.ci=--version \
       -Dquarkus.quinoa.package-manager-command.build=--version
