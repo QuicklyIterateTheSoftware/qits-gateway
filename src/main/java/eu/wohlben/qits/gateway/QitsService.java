@@ -45,6 +45,7 @@ public enum QitsService {
   WORKSPACES,
   PROJECTS,
   STT,
+  EVENTS,
   CI,
   CD;
 

@@ -224,6 +224,7 @@ is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim
 | `qits-workspaces` | `workspaces` | `/workspaces/*` | `qits-workspaces` |
 | `qits-projects` | `projects` | `/projects/*` | `qits-projects` |
 | `qits-stt` | `stt` | `/stt/*` | `qits-stt` |
+| `qits-events` | `events` | `/events/*` | `qits-events` |
 | `qits-ci` | `ci` | `/ci/*` | `qits-ci` |
 | `qits-cd` | `cd` | `/cd/*` | `qits-cd` |
 
