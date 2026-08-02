@@ -100,7 +100,7 @@ steps:
       cd -
 
       # --- half two: the image ------------------------------------------------------------------
-      ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-gateway:$version"
+      ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-gateway:$QITS_COMMIT_SHA"
       docker build -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=local .
       docker push "$ref"
       docker rmi "$ref" || true
