@@ -11,8 +11,10 @@ steps:
       git submodule update --init --depth 1 src/main/webui
       git -C src/main/webui fetch "$frontend_url" "refs/tags/$version:refs/tags/$version"
       git -C src/main/webui checkout --detach "$version"
-      git update-index --add --cacheinfo 160000,$(git -C src/main/webui rev-parse HEAD),src/main/webui
-      git diff --cached --quiet && exit 0
+      target=$(git -C src/main/webui rev-parse HEAD)
+      current=$(git ls-tree HEAD src/main/webui | awk '{print $3}')
+      [ "$current" = "$target" ] && exit 0
+      git update-index --add --cacheinfo 160000,$target,src/main/webui
       git -c user.name="qits release train" -c user.email="release-train@qits.local" commit -q \\
         -m "bump(qits-spa-home@$version): follow qits-spa-home"
       git push --force "$QITS_CI_REPOSITORY_URL" HEAD:refs/heads/maintenance/qits-spa-home
