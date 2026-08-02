@@ -85,7 +85,8 @@ steps:
       # passed as environment
       # rather than as a file — qits-spa-home's committed .npmrc outranks any ~/.npmrc this step
       # could write.
-      git submodule update --init src/main/webui
+      frontend_url="${QITS_CI_REPOSITORY_URL%/*}/qits-spa-home"
+      git -c submodule.qits-spa-home.url="$frontend_url" submodule update --init src/main/webui
 
       cd src/main/webui
       npm_origin=$(node -p 'new URL(process.env.QITS_NPM_PROXY_URL).origin')
