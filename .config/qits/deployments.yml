@@ -3,3 +3,5 @@
 # environment's public node: it joins the environment bundle network and every
 # per-application network as the hub.
 available_on_env: true
+# The gateway owns the root path space, so cd's convention /gateway/q/health/ready would 404.
+health_path: /q/health/ready
