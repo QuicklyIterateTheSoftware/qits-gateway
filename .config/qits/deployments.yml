@@ -1,0 +1,5 @@
+# How qits-cd deploys this repo. It reads this file from the git host at the
+# built sha. deployment_target defaults to environment. The gateway is the
+# environment's public node: it joins the environment bundle network and every
+# per-application network as the hub.
+available_on_env: true
