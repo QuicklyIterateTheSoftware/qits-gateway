@@ -19,6 +19,27 @@ class QitsServiceTest {
   }
 
   @Test
+  void aMultiWordServiceIsDashedEverywhereItIsRead() {
+    // The enum spells the name with an underscore because Java requires it; nothing else may.
+    // name().toLowerCase() alone would put /platform_deployments in the URL and qits-platform_
+    // deployments on the network, and both are wrong.
+    assertEquals("platform-deployments", QitsService.PLATFORM_DEPLOYMENTS.segment());
+    assertEquals("/platform-deployments", QitsService.PLATFORM_DEPLOYMENTS.pathPrefix());
+    assertEquals("qits-platform-deployments", QitsService.PLATFORM_DEPLOYMENTS.defaultHost());
+    assertTrue(QitsService.forSegment("platform_deployments").isEmpty());
+  }
+
+  @Test
+  void noSegmentCarriesAnUnderscore() {
+    // The derivation rule, asserted across the whole enum so the next multi-word service inherits
+    // it rather than rediscovering it.
+    for (QitsService service : QitsService.values()) {
+      assertTrue(
+          service.segment().indexOf('_') < 0, service + " must not have an underscore in its URL");
+    }
+  }
+
+  @Test
   void forSegmentResolvesKnownServicesAndIsCaseInsensitive() {
     assertEquals(Optional.of(QitsService.OBSERVABILITY), QitsService.forSegment("observability"));
     assertEquals(Optional.of(QitsService.OBSERVABILITY), QitsService.forSegment("OBSERVABILITY"));

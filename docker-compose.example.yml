@@ -38,6 +38,11 @@ services:
       # disappears once this listener terminates TLS. See qits-artifacts' README.
       # QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS: "qits-artifacts"
       # QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY: "qits-observability"
+      #
+      # A multi-word segment is dashed in the URL (/platform-deployments/*) and underscored here,
+      # like every other env spelling. It reaches the route table because the gateway looks each
+      # known service up by name — see the README's registry section for why that is load-bearing.
+      # QITS_GATEWAY_PROXY_HOSTS_PLATFORM_DEPLOYMENTS: "qits-platform-deployments"
     networks:
       - qits-net
     depends_on:

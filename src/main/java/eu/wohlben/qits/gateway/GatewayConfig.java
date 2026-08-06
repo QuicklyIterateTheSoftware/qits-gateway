@@ -27,6 +27,12 @@ import java.util.Map;
  * from anything in a request, which is the SSRF guard qits' own {@code ServiceProxyRoute} keeps.
  * Since config sources include environment variables, a deployment declares the whole table without
  * a file: {@code QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS=qits-artifacts}.
+ *
+ * <p><b>The map below is not the whole story, and must not be made to be.</b> Discovery cannot pull
+ * a multi-word map key out of an all-underscore environment variable name, so {@link RouteTable}
+ * additionally looks every known segment up by exact name — see {@code
+ * RouteTable#resolveProxyHosts}. What the map remains the only source of is an <i>unknown</i> key,
+ * which is what fails startup.
  */
 @ConfigMapping(prefix = "qits.gateway")
 public interface GatewayConfig {

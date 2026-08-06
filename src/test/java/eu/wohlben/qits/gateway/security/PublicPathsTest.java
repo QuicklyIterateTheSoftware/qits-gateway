@@ -152,6 +152,18 @@ class PublicPathsTest {
     }
 
     @Test
+    void nothingOfPlatformDeploymentsIsPublic() {
+      // qits-platform-deployments supersedes qits-cd and inherits its posture exactly: the intake
+      // is an intra-network call from qits-ci, and the reads are a browser's, so the whole segment
+      // stays behind the session policy. Same pairing rule as above — a front-door intake spelling
+      // and a write guard in the service arrive together or not at all.
+      assertFalse(PublicPaths.isPublic("GET", "/platform-deployments/api/events/build-succeeded"));
+      assertFalse(PublicPaths.isPublic("GET", "/platform-deployments/api/environments"));
+      assertFalse(PublicPaths.isPublic("GET", "/platform-deployments/api/deployments"));
+      assertFalse(PublicPaths.isPublic("GET", "/platform-deployments/api"));
+    }
+
+    @Test
     void otlpIngestIsPublicUnderTheObservabilitySegment() {
       assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/traces"));
       assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/logs"));

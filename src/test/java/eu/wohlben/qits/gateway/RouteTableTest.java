@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -160,6 +161,52 @@ class RouteTableTest {
             IllegalArgumentException.class,
             () -> RouteTable.buildRoutes(Map.of("nope", "qits-nope")));
     assertTrue(e.getMessage().contains("nope"));
+  }
+
+  // --- resolveProxyHosts: the entries config-mapping DISCOVERY cannot deliver -------------------
+
+  @Test
+  void aMultiWordSegmentIsFoundByNameWhenDiscoveryMissedIt() {
+    // The measured SmallRye behaviour this exists for: QITS_GATEWAY_PROXY_HOSTS_PLATFORM_
+    // DEPLOYMENTS reaches the @ConfigMapping Map as NOTHING — the wildcard that stands for the map
+    // key consumes one word, so the second one has nowhere to go — while an exact-name lookup of
+    // the same property answers. Without this step the route silently does not exist.
+    Map<String, String> resolved =
+        RouteTable.resolveProxyHosts(
+            Map.of(),
+            name ->
+                name.equals("qits.gateway.proxy-hosts.platform-deployments")
+                    ? Optional.of("qits-platform-deployments")
+                    : Optional.empty());
+
+    assertEquals(Map.of("platform-deployments", "qits-platform-deployments"), resolved);
+    assertEquals(
+        "platform-deployments",
+        matched(
+            RouteTable.of(RouteTable.buildRoutes(resolved)),
+            "/platform-deployments/api/deployments"));
+  }
+
+  @Test
+  void aServiceWithNoEntryStaysUnrouted() {
+    // The lookup asks about every known service, so "asked and not configured" must stay exactly as
+    // absent as before — otherwise every gateway would route everything.
+    assertEquals(Map.of(), RouteTable.resolveProxyHosts(Map.of(), name -> Optional.empty()));
+  }
+
+  @Test
+  void discoveryWinsAndUnknownKeysSurviveToFailStartup() {
+    // The map member is kept for one job: an unknown segment is only visible through discovery, and
+    // must still reach buildRoutes to fail there. The lookup must not overwrite a discovered entry
+    // either — that is the deployment's own spelling of the same property.
+    Map<String, String> resolved =
+        RouteTable.resolveProxyHosts(
+            Map.of("artifacts", "localhost:9999", "nope", "somewhere"),
+            name -> Optional.of("qits-net-default"));
+
+    assertEquals("localhost:9999", resolved.get("artifacts"));
+    assertEquals("somewhere", resolved.get("nope"));
+    assertThrows(IllegalArgumentException.class, () -> RouteTable.buildRoutes(resolved));
   }
 
   @Test

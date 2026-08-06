@@ -4,9 +4,14 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.eclipse.microprofile.config.Config;
 
 /**
  * The gateway's single source of truth for "which component owns this path". It is built from the
@@ -29,11 +34,17 @@ public class RouteTable {
   /** The upstream port assumed when a {@code proxy-hosts} value names no {@code :port}. */
   static final int DEFAULT_UPSTREAM_PORT = 8080;
 
+  /** The configuration name a {@code proxy-hosts} entry has, with the segment appended. */
+  static final String PROXY_HOSTS_PREFIX = "qits.gateway.proxy-hosts.";
+
   private final List<GatewayRoute> routes;
 
   @Inject
-  public RouteTable(GatewayConfig config) {
-    this(buildRoutes(config.proxyHosts()));
+  public RouteTable(GatewayConfig config, Config configuration) {
+    this(
+        buildRoutes(
+            resolveProxyHosts(
+                config.proxyHosts(), name -> configuration.getOptionalValue(name, String.class))));
   }
 
   private RouteTable(List<GatewayRoute> routes) {
@@ -53,6 +64,49 @@ public class RouteTable {
   /** Test seam: build a table straight from resolved routes, with no configuration source. */
   public static RouteTable of(List<GatewayRoute> routes) {
     return new RouteTable(routes);
+  }
+
+  /**
+   * The configured registry, with every entry an environment variable could not deliver added back.
+   *
+   * <p>This exists because of one measured SmallRye behaviour, and it is worth stating plainly
+   * since the failure is silent. A {@code Map} member of a {@code @ConfigMapping} is populated by
+   * <b>discovery</b>: SmallRye walks the property names it can see and matches them against {@code
+   * qits.gateway.proxy-hosts.*}. An environment variable carries no separators — {@code
+   * QITS_GATEWAY_PROXY_HOSTS_PLATFORM_DEPLOYMENTS} is underscores throughout — so the match has to
+   * guess where the fixed part ends and the map key begins, and the wildcard consumes exactly one
+   * word. A single-word segment matches; {@code platform-deployments} does not, and the entry lands
+   * in <i>no</i> map: no route, no error, a gateway that reports ready and serves the landing page
+   * where a service should be.
+   *
+   * <p>Looking a name <b>up</b> has no such problem — {@code Config.getOptionalValue} asks each
+   * source for one exact name, and the environment source answers it by encoding the name it was
+   * given. So the closed {@link QitsService} set is queried directly for every service the mapped
+   * map did not already name. Discovery keeps its one remaining job, which is the reason the map
+   * member stays: a key that names no service is still visible, and still fails startup.
+   *
+   * @param mapped what {@code @ConfigMapping} discovery produced — authoritative where it has an
+   *     entry, and the only place an unknown segment can come from
+   * @param byName an exact-name configuration lookup, applied to {@code qits.gateway.proxy-hosts.}
+   *     plus a known segment
+   */
+  static Map<String, String> resolveProxyHosts(
+      Map<String, String> mapped, Function<String, Optional<String>> byName) {
+    Set<QitsService> alreadyNamed =
+        mapped.keySet().stream()
+            .map(QitsService::forSegment)
+            .flatMap(Optional::stream)
+            .collect(Collectors.toSet());
+    Map<String, String> resolved = new LinkedHashMap<>(mapped);
+    for (QitsService service : QitsService.values()) {
+      if (alreadyNamed.contains(service)) {
+        continue;
+      }
+      byName
+          .apply(PROXY_HOSTS_PREFIX + service.segment())
+          .ifPresent(host -> resolved.put(service.segment(), host));
+    }
+    return resolved;
   }
 
   /**

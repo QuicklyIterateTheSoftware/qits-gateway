@@ -227,9 +227,17 @@ is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim
 | `qits-events` | `events` | `/events/*` | `qits-events` |
 | `qits-ci` | `ci` | `/ci/*` | `qits-ci` |
 | `qits-cd` | `cd` | `/cd/*` | `qits-cd` |
+| `qits-platform-deployments` | `platform-deployments` | `/platform-deployments/*` | `qits-platform-deployments` |
 
 ᵃ `/v2/*` is the OCI registry root, claimed by the artifacts entry rather than by a key of its own —
 see "The routing model". It is the only prefix in the system that is not a service segment.
+
+`qits-platform-deployments` supersedes `qits-cd` — it owns environment topology and deployment
+execution in one service. The `cd` entry stays in the registry because a platform deployed before
+that cutover still names it; nothing new configures it.
+
+A **multi-word segment is dashed**, in the URL and in the container name alike: the underscore in
+`PLATFORM_DEPLOYMENTS` is Java's spelling of an enum constant and appears nowhere else.
 
 (The "default host" is the container's `qits-net` DNS name — what you would normally put in the
 `proxy-hosts` value. Add a service to the enum when a new component splits out.) As environment
@@ -239,7 +247,18 @@ variables:
 QITS_GATEWAY_APP_HOST=qits
 QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS=qits-artifacts
 QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY=qits-observability:9000   # host:port when not on 8080
+QITS_GATEWAY_PROXY_HOSTS_PLATFORM_DEPLOYMENTS=qits-platform-deployments   # dashed segment
 ```
+
+The last line works because the gateway **looks each known service up by name** rather than relying
+only on config-mapping discovery, and that is not a detail to remove. A `Map` member of a
+`@ConfigMapping` is filled by matching visible property names against `qits.gateway.proxy-hosts.*`,
+and an environment variable carries no separators — so the wildcard standing for the map key
+consumes one word, and `…_PLATFORM_DEPLOYMENTS` matches nothing. The entry would land in no map: no
+route, no error, and a gateway that reports ready while serving the landing page where a service
+should be. An exact-name lookup has no such ambiguity, so `RouteTable` asks for every segment in the
+closed enum. Discovery keeps its one remaining job — an unknown key is only visible there, and is
+what still fails startup.
 
 Edge headers:
 

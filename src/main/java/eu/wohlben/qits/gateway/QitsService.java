@@ -47,7 +47,13 @@ public enum QitsService {
   STT,
   EVENTS,
   CI,
-  CD;
+  /**
+   * qits-cd, superseded by {@link #PLATFORM_DEPLOYMENTS} and kept because a platform deployed
+   * before that cutover still names this segment. Nothing new configures it.
+   */
+  CD,
+  /** qits-platform-deployments — environment topology plus deployment execution, in one service. */
+  PLATFORM_DEPLOYMENTS;
 
   private final List<String> extraPrefixes;
 
@@ -55,9 +61,16 @@ public enum QitsService {
     this.extraPrefixes = List.of(extraPrefixes);
   }
 
-  /** The public path segment, with the {@code qits-} prefix dropped — e.g. {@code "artifacts"}. */
+  /**
+   * The public path segment, with the {@code qits-} prefix dropped — e.g. {@code "artifacts"}.
+   *
+   * <p>A multi-word name is <b>dashed</b>, not underscored: {@code PLATFORM_DEPLOYMENTS} is reached
+   * at {@code /platform-deployments/*}. The underscore is the enum's own spelling and has no place
+   * in a URL, so the rule lives in the derivation rather than in a per-constant override — the next
+   * multi-word service gets it right without anyone remembering.
+   */
   public String segment() {
-    return name().toLowerCase(Locale.ROOT);
+    return name().toLowerCase(Locale.ROOT).replace('_', '-');
   }
 
   /** The inbound path prefix this service claims — e.g. {@code "/artifacts"}. */

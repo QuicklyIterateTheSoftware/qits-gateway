@@ -86,7 +86,10 @@ src/main/java/eu/wohlben/qits/gateway/
                               is what makes a proxied segment beat the landing SPA
   GatewayConfig.java          @ConfigMapping — the entire configuration surface
   GatewayRoute.java           one resolved route; prefix matching (framework-free)
-  RouteTable.java             config -> routes (segment validation, host:port parse); longest-prefix
+  RouteTable.java             config -> routes (segment validation, host:port parse); longest-prefix.
+                              Also looks every known segment up BY NAME, because @ConfigMapping Map
+                              discovery drops a multi-word key set from an env var — read
+                              resolveProxyHosts before simplifying it back to the mapped map
   GatewayRouter.java          the catch-all Vert.x route (order 20_000 — read its ROUTE_ORDER
                               javadoc before moving it); one HttpProxy per route
   EdgeHeaders.java            the only rewrites: header hygiene + X-Forwarded-* (verbatim otherwise)
