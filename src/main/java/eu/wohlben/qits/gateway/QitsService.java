@@ -53,7 +53,16 @@ public enum QitsService {
    */
   CD,
   /** qits-platform-deployments — environment topology plus deployment execution, in one service. */
-  PLATFORM_DEPLOYMENTS;
+  PLATFORM_DEPLOYMENTS,
+  /**
+   * qits-platform-docs — the reading surface over the documentation sites qits-artifacts holds.
+   *
+   * <p>It stores nothing: it resolves a site's newest version and streams bytes from {@code
+   * /artifacts/docs}, so the two are one deployment decision rather than two stores to keep in
+   * step. Which means this entry routes a <em>view</em>, and a deployment that runs it without
+   * qits-artifacts has published no documentation to look at.
+   */
+  PLATFORM_DOCS;
 
   private final List<String> extraPrefixes;
 

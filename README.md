@@ -228,6 +228,7 @@ is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim
 | `qits-ci` | `ci` | `/ci/*` | `qits-ci` |
 | `qits-cd` | `cd` | `/cd/*` | `qits-cd` |
 | `qits-platform-deployments` | `platform-deployments` | `/platform-deployments/*` | `qits-platform-deployments` |
+| `qits-platform-docs` | `platform-docs` | `/platform-docs/*` | `qits-platform-docs` |
 
 ᵃ `/v2/*` is the OCI registry root, claimed by the artifacts entry rather than by a key of its own —
 see "The routing model". It is the only prefix in the system that is not a service segment.
@@ -235,6 +236,11 @@ see "The routing model". It is the only prefix in the system that is not a servi
 `qits-platform-deployments` supersedes `qits-cd` — it owns environment topology and deployment
 execution in one service. The `cd` entry stays in the registry because a platform deployed before
 that cutover still names it; nothing new configures it.
+
+`qits-platform-docs` serves the documentation sites qits-artifacts holds and stores nothing of its
+own — it resolves a site's newest version and streams the bytes through. So it is a *view*, and
+routing it on a deployment without qits-artifacts gives you a reader for documentation nobody has
+published.
 
 A **multi-word segment is dashed**, in the URL and in the container name alike: the underscore in
 `PLATFORM_DEPLOYMENTS` is Java's spelling of an enum constant and appears nowhere else.

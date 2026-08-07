@@ -27,6 +27,12 @@ class QitsServiceTest {
     assertEquals("/platform-deployments", QitsService.PLATFORM_DEPLOYMENTS.pathPrefix());
     assertEquals("qits-platform-deployments", QitsService.PLATFORM_DEPLOYMENTS.defaultHost());
     assertTrue(QitsService.forSegment("platform_deployments").isEmpty());
+
+    // The second multi-word service, which is what makes the rule above a derivation rather than
+    // one constant's special case.
+    assertEquals("platform-docs", QitsService.PLATFORM_DOCS.segment());
+    assertEquals("/platform-docs", QitsService.PLATFORM_DOCS.pathPrefix());
+    assertEquals("qits-platform-docs", QitsService.PLATFORM_DOCS.defaultHost());
   }
 
   @Test
