@@ -1,7 +1,18 @@
-# How qits-cd deploys this repo. It reads this file from the git host at the
-# built sha. deployment_target defaults to environment. The gateway is the
-# environment's public node: it joins the environment bundle network and every
-# per-application network as the hub.
-available_on_env: true
-# The gateway owns the root path space, so cd's convention /gateway/q/health/ready would 404.
+# How qits-platform-deployments deploys this repo. It reads this file from the git host at the
+# built sha.
+#
+# The gateway is a PLATFORM service: one instance for the whole platform. It publishes the host's
+# only port and every environment is reached through that one origin, so a per-tier copy would be a
+# second binder for a single port — the tier that lost the race would simply fail to start. It
+# deploys from `platform/main`, the plane's convention and the mirror of a tier's
+# `environment/<name>`; `main` stays the integration trunk and ships nothing.
+#
+# `available_on_env: true` is GONE with the flip rather than merely unset. It made this an
+# environment's public node — joined to that tier's bundle network and to each of its
+# per-application networks. A platform service joins every environment's per-application networks
+# unconditionally, so the reach is the same; what it does not join is the bundle network, whose
+# only member was this gateway itself. Registration drops the flag for a platform service either
+# way, so stating it here could only ever be a second, wrong answer.
+deployment_target: platform
+# The gateway owns the root path space, so the convention /gateway/q/health/ready would 404.
 health_path: /q/health/ready
