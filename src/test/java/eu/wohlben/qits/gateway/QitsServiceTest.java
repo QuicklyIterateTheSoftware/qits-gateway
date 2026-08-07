@@ -3,11 +3,17 @@ package eu.wohlben.qits.gateway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
-/** The registry's derivation rules: public segment, path prefix, default container host, lookup. */
+/**
+ * The registry's derivation rules: public segment, path prefix, default container host, lookup —
+ * plus the display identity the navigation is built from.
+ */
 class QitsServiceTest {
 
   @Test
@@ -98,6 +104,67 @@ class QitsServiceTest {
         }
       }
     }
+  }
+
+  @Test
+  void exactlyTheseServicesAreInTheNavigation() {
+    // Pinned as a set rather than left to whoever adds the next constant: a label is what puts a
+    // service in front of every user of the platform, so adding or dropping one should be a diff
+    // here and not a side effect of extending the enum.
+    Map<QitsService, String> expected =
+        Map.of(
+            QitsService.CI, "CI",
+            QitsService.PLATFORM_DEPLOYMENTS, "Deployments",
+            QitsService.ARTIFACTS, "Artifacts",
+            QitsService.PROJECTS, "Projects",
+            QitsService.WORKSPACES, "Workspaces",
+            QitsService.EVENTS, "Events",
+            QitsService.OBSERVABILITY, "Observability",
+            QitsService.PLATFORM_DOCS, "Docs");
+
+    for (QitsService service : QitsService.values()) {
+      assertEquals(
+          Optional.ofNullable(expected.get(service)),
+          service.navigationLabel(),
+          service + "'s navigation label");
+    }
+  }
+
+  @Test
+  void aServiceWithNoClientAndASupersededOneCarryNoLabel() {
+    // Both omissions are decisions, and both are easy to mistake for oversights — stt is an API
+    // with no SPA behind it, and cd is superseded by platform-deployments, which carries the
+    // "Deployments" entry. The javadoc on each constant says so; this is what stops a well-meaning
+    // "completion" of the list from being green.
+    assertTrue(QitsService.STT.navigationLabel().isEmpty());
+    assertTrue(QitsService.CD.navigationLabel().isEmpty());
+    assertEquals(QitsService.NOT_IN_NAVIGATION, QitsService.STT.navigationPosition());
+    assertEquals(QitsService.NOT_IN_NAVIGATION, QitsService.CD.navigationPosition());
+  }
+
+  @Test
+  void noTwoServicesShareALabelOrAPosition() {
+    // A duplicate label shows a user two identical entries going to different places; a duplicate
+    // position leaves the sort to whatever the stream happened to do, which is a menu that can
+    // reorder itself between JDKs. Neither is visible without a test.
+    List<String> labels = new ArrayList<>();
+    List<Integer> positions = new ArrayList<>();
+    for (QitsService service : QitsService.values()) {
+      if (service.navigationLabel().isEmpty()) {
+        continue;
+      }
+      labels.add(service.navigationLabel().orElseThrow());
+      positions.add(service.navigationPosition());
+      assertTrue(
+          service.navigationPosition() > QitsService.NOT_IN_NAVIGATION,
+          service + " is in the navigation and must have a real position");
+    }
+    assertEquals(
+        labels.size(), Set.copyOf(labels).size(), "duplicate navigation label in " + labels);
+    assertEquals(
+        positions.size(),
+        Set.copyOf(positions).size(),
+        "duplicate navigation position " + positions);
   }
 
   @Test

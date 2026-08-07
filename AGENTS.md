@@ -81,9 +81,10 @@ build.
 ```
 src/main/java/eu/wohlben/qits/gateway/
   QitsService.java            the registry: enum of proxyable services; segment/host derivation,
-                              plus the extra root-level prefixes a service may claim (/v2). The
-                              ONLY place a service is declared — route order, not a config list,
-                              is what makes a proxied segment beat the landing SPA
+                              plus the extra root-level prefixes a service may claim (/v2), plus
+                              the DISPLAY identity (navigation label + position; no label ⇒ no
+                              menu entry). The ONLY place a service is declared — route order, not
+                              a config list, is what makes a proxied segment beat the landing SPA
   GatewayConfig.java          @ConfigMapping — the entire configuration surface
   GatewayRoute.java           one resolved route; prefix matching (framework-free)
   RouteTable.java             config -> routes (segment validation, host:port parse); longest-prefix.
@@ -96,6 +97,9 @@ src/main/java/eu/wohlben/qits/gateway/
   RouteTableHealthCheck.java  readiness = a non-empty route table
   AssertedIdentity.java       the identity hand-off from the route handler to EdgeHeaders
   ConfigJsonRoute.java        GET /api/config.json, as a raw route (there is no REST layer)
+  NavigationRoute.java        GET|HEAD /main-navigation — the platform's left navigation, derived
+                              from the ROUTE TABLE (not from QitsService.values()), so a service
+                              appears in the menu exactly when this gateway routes it
   security/
     QitsAuthPolicy.java       the one authorization decision (global HttpSecurityPolicy)
     PublicPaths.java          the token-free allowlist — grouped by who serves the path
@@ -147,8 +151,8 @@ exception once" is how the monolith's catch-all comes back:
   `200 text/html` is worse than a 404 for a **machine** client. The guard is **route order**, not a
   list. `GatewayRouter` registers at 20 000, between Quinoa's static resources (1060) and Quinoa's
   SPA fallback (40 000), so a path the route table claims is proxied and only what no route claimed
-  reaches the SPA. `quarkus.quinoa.ignored-path-prefixes` is therefore down to `/api,/q` — the
-  gateway's own machine surface, which no route table covers.
+  reaches the SPA. `quarkus.quinoa.ignored-path-prefixes` is therefore down to
+  `/api,/q,/main-navigation` — the gateway's own machine surface, which no route table covers.
 - **This is the inverted arrangement, and the inversion is the point.** The SPA fallback used to run
   *first*, which forced `ignored-path-prefixes` to re-state every platform segment — a hand-kept
   copy of `QitsService` that silently swallowed any segment missing from it. Adding a service now

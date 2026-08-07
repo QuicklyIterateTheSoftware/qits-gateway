@@ -52,6 +52,19 @@ class PublicPathsTest {
     }
 
     @Test
+    void theNavigationIsPublicExactlyNotAsPrefix() {
+      // Fetched by a browser that has no session yet — the chrome renders before there is anything
+      // to authenticate — so it is in the same group as the config relay above.
+      assertTrue(PublicPaths.isPublic("GET", "/main-navigation"));
+      assertTrue(PublicPaths.isPublic("HEAD", "/main-navigation"));
+      // Prefix must not bleed: nothing else is served under this name, and a near miss is a 404
+      // rather than a second public path.
+      assertFalse(PublicPaths.isPublic("GET", "/main-navigation/"));
+      assertFalse(PublicPaths.isPublic("GET", "/main-navigations"));
+      assertFalse(PublicPaths.isPublic("GET", "/main-navigation/links"));
+    }
+
+    @Test
     void authEndpointsArePublic() {
       assertTrue(PublicPaths.isPublic("GET", "/api/auth/me"));
       assertTrue(PublicPaths.isPublic("GET", "/api/auth/logout"));

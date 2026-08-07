@@ -81,6 +81,11 @@ and forwarded to the `qits-artifacts` container. Which services are *live* is a 
 (see [Configuration](#configuration)); everything they do not claim is a 404 from the gateway
 itself.
 
+The enum carries a service's **display** identity as well as its routing identity — a navigation
+label and a place in the list, or neither. That is what lets the gateway answer
+[`/main-navigation`](#main-navigation) instead of every SPA shipping its own copy of the menu, and a
+service is still declared in exactly one place.
+
 **Resolution is longest-prefix-wins**, regardless of declaration order, so adding a service never
 depends on where its line lands in a properties file. Matching is **segment-aware** — `/art` never captures `/artifacts/…`, and `/ci` never
 captures `/cicd/…`. A path no route claims names **no upstream**: the gateway opens no connection
@@ -110,7 +115,7 @@ SPA's two halves rather than sitting behind both:
 
 | Order | Route | Claims |
 | --- | --- | --- |
-| 100 | `ConfigJsonRoute`, `AuthMeRoute` | `/api/config.json`, `/api/auth/me` |
+| 100 | `ConfigJsonRoute`, `AuthMeRoute`, `NavigationRoute` | `/api/config.json`, `/api/auth/me`, `/main-navigation` |
 | 1060 | Quinoa's generated static resources | the bundle's own files (`/`, `/index.html`, `/main-*.js`, …) |
 | 10 000 | `RouteConstants.ROUTE_ORDER_DEFAULT` | where an unordered route would land |
 | **20 000** | **`GatewayRouter`** | **the route table; no match ⇒ `next()`** |
@@ -123,10 +128,13 @@ reasoning; anything in `(1060, 40000)` would do, and a value at or past 40 000 s
 old arrangement.
 
 So a proxied segment beats the landing page **because a route claims it**, and the SPA gets only
-what no route claimed. `quarkus.quinoa.ignored-path-prefixes` is back down to `/api,/q` — the
-gateway's own machine surface, the same list every other qits service carries and for the same
-reason: those paths are served by this process, the route table has no say over them, and something
-must still stop the SPA from answering a mistyped one with a web page.
+what no route claimed. `quarkus.quinoa.ignored-path-prefixes` is back down to
+`/api,/q,/main-navigation` — the gateway's own machine surface, near enough the same list every
+other qits service carries and for the same reason: those paths are served by this process, the
+route table has no say over them, and something must still stop the SPA from answering a mistyped
+one with a web page. The third entry is defence in depth rather than what makes its route work
+(order 100 already wins the exact path); what it covers is the near miss, `/main-navigation/`, which
+would otherwise answer `200 text/html` to a client parsing JSON.
 
 Consequences worth stating plainly:
 
@@ -217,21 +225,26 @@ The **service registry** — one entry per live split-out service, keyed by its 
 is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim. A service is routed
 **only** when it has a `proxy-hosts` entry, so undeployed services simply 404 rather than 502.
 
-| Service (submodule) | Segment | Reached at | Default host |
-| --- | --- | --- | --- |
-| `qits-artifacts` | `artifacts` | `/artifacts/*`, `/v2/*` ᵃ | `qits-artifacts` |
-| `qits-observability` | `observability` | `/observability/*` | `qits-observability` |
-| `qits-workspaces` | `workspaces` | `/workspaces/*` | `qits-workspaces` |
-| `qits-projects` | `projects` | `/projects/*` | `qits-projects` |
-| `qits-stt` | `stt` | `/stt/*` | `qits-stt` |
-| `qits-events` | `events` | `/events/*` | `qits-events` |
-| `qits-ci` | `ci` | `/ci/*` | `qits-ci` |
-| `qits-cd` | `cd` | `/cd/*` | `qits-cd` |
-| `qits-platform-deployments` | `platform-deployments` | `/platform-deployments/*` | `qits-platform-deployments` |
-| `qits-platform-docs` | `platform-docs` | `/platform-docs/*` | `qits-platform-docs` |
+| Service (submodule) | Segment | Reached at | Default host | Navigation ᶜ |
+| --- | --- | --- | --- | --- |
+| `qits-artifacts` | `artifacts` | `/artifacts/*`, `/v2/*` ᵃ | `qits-artifacts` | Artifacts (3) |
+| `qits-observability` | `observability` | `/observability/*` | `qits-observability` | Observability (7) |
+| `qits-workspaces` | `workspaces` | `/workspaces/*` | `qits-workspaces` | Workspaces (5) |
+| `qits-projects` | `projects` | `/projects/*` | `qits-projects` | Projects (4) |
+| `qits-stt` | `stt` | `/stt/*` | `qits-stt` | — |
+| `qits-events` | `events` | `/events/*` | `qits-events` | Events (6) |
+| `qits-ci` | `ci` | `/ci/*` | `qits-ci` | CI (1) |
+| `qits-cd` | `cd` | `/cd/*` | `qits-cd` | — |
+| `qits-platform-deployments` | `platform-deployments` | `/platform-deployments/*` | `qits-platform-deployments` | Deployments (2) |
+| `qits-platform-docs` | `platform-docs` | `/platform-docs/*` | `qits-platform-docs` | Docs (8) |
 
 ᵃ `/v2/*` is the OCI registry root, claimed by the artifacts entry rather than by a key of its own —
 see "The routing model". It is the only prefix in the system that is not a service segment.
+
+ᶜ The label and place this service takes in [`/main-navigation`](#main-navigation) when it is routed;
+`—` means it is routable but never shown. `stt` is an API with no SPA behind it, and `cd` is
+superseded by `platform-deployments`, which carries the *Deployments* entry — so a platform old
+enough to still route `cd` shows one link rather than two meaning the same thing.
 
 `qits-platform-deployments` supersedes `qits-cd` — it owns environment topology and deployment
 execution in one service. The `cd` entry stays in the registry because a platform deployed before
@@ -360,7 +373,8 @@ hold no user token by construction (workspace containers doing git/OTLP/MCP, hea
 The allowlist is grouped by **who serves the path**, because that is what decides when an entry
 expires:
 
-- the gateway's own surface (`/q/*`, `/api/auth/*`, `/api/config.json`) — permanent;
+- the gateway's own surface (`/q/*`, `/api/auth/*`, `/api/config.json`, `/main-navigation`) —
+  permanent;
 - the segment-prefixed forms a split-out service serves (`/artifacts/git/*`,
   `/observability/api/otel/*`, `/ci/api/events/*`, `/workspaces/daemon/*`, `/projects/mcp`, …) —
   permanent, and identical to the address the service serves on `qits-net` because forwarding is
@@ -450,10 +464,11 @@ unchanged: front the gateway with a forward-auth proxy and have it translate `Re
 | `/q/health/ready` | the route table is non-empty — and the response data *is* the route table |
 | `/api/auth/me` | which auth target this build carries, and who is logged in |
 | `/api/config.json` | the web components' identity relay (see below) |
+| `/main-navigation` | the platform's left navigation, derived from the route table (see below) |
 | `/` and every unclaimed GET | the [landing SPA](#the-landing-spa), with client-route fallback |
 
-All are served locally and never proxied — `/api` and `/q` are registered ahead of the proxy (order
-100) or skipped by it, and no route table can claim them.
+All are served locally and never proxied — they are registered ahead of the proxy (order 100) or
+skipped by it, and no route table can claim them.
 
 `/api/config.json` is **web-component configuration, not telemetry configuration**, so it lives with
 the thing that serves the web components rather than with qits-observability, which used to own it.
@@ -464,6 +479,54 @@ The browser cannot read environment variables and this process can: a deployment
 endpoint). It is the one gateway path that **cannot** be renamed: `@qits/angular` fetches the
 base-relative `api/config.json` before the application bootstraps, so there is no running app to
 tell about a new address. It takes no segment prefix because the gateway has none.
+
+### `/main-navigation`
+
+The platform's left navigation, as JSON, answered `GET` and `HEAD`:
+
+```json
+{"links":[{"label":"Home","href":"/"},{"label":"CI","href":"/ci/"}]}
+```
+
+**It is derived from the route table, not from the `QitsService` enum**, and that is the entire
+reason it lives here. `@qits/ui-components` used to hardcode the same list at compile time and ship
+it as an npm package: a second declaration of what the platform serves, held by something that
+cannot know, updated by a release. It lagged exactly the way a copy does — `/platform-docs/` was
+routed for a while with no entry pointing at it. The gateway is the one process that knows what it
+routes, so a service appears in the menu **precisely when it is proxied**, with nothing to release.
+
+The rules, all of them:
+
+- **`Home` is prepended unconditionally.** The landing SPA is this process' own static output, not a
+  `QitsService`, so it is in no route table — and it is never missing, because it is compiled into
+  the binary.
+- **One link per service, not per route.** `qits-artifacts` produces two routes from its single
+  `proxy-hosts` entry, and **`/v2` never appears**: it is the address docker hardcodes for the OCI
+  Distribution API, a protocol root rather than a page.
+- **A service with no label is not in the navigation** — `stt` (an API with no SPA behind it) and
+  `cd` (superseded by `platform-deployments`, which carries the *Deployments* entry). Both omissions
+  are decisions rather than gaps; the enum says so on each constant and `QitsServiceTest` holds it.
+- **Order is `QitsService.navigationPosition()`**, never the route table's — that one is sorted
+  longest-prefix-first, which is a matching concern and would put the menu in an order nobody chose.
+- **`href` carries its trailing slash** (`/ci/`). The consuming library normalises both sides when it
+  decides which entry is current, but it renders the anchor verbatim, so the slash is what a user
+  sees and copies.
+
+A gateway routing the whole registry above answers, in this order:
+
+```json
+{"links":[{"label":"Home","href":"/"},{"label":"CI","href":"/ci/"},
+          {"label":"Deployments","href":"/platform-deployments/"},
+          {"label":"Artifacts","href":"/artifacts/"},{"label":"Projects","href":"/projects/"},
+          {"label":"Workspaces","href":"/workspaces/"},{"label":"Events","href":"/events/"},
+          {"label":"Observability","href":"/observability/"},{"label":"Docs","href":"/platform-docs/"}]}
+```
+
+An **object** with a `links` array, not a bare array, so this document can grow a second field
+without every SPA in the platform needing a release to keep parsing it. `Cache-Control: no-store`:
+the route table is a deployment fact, and a browser holding yesterday's copy renders a menu missing
+the service it was just told to go and use. It is public (`PublicPaths`) for the same reason
+`/api/config.json` is — the chrome renders before there is anything to authenticate.
 
 Readiness deliberately does **not** probe upstreams: an upstream being down is a 502 for that path,
 not a reason to pull the whole front door and take every other component offline with it.
@@ -593,7 +656,7 @@ be upgraded independently of what it fronts.
 Implemented: the `QitsService` registry (a named, enum-backed set of proxyable services),
 config-driven longest-prefix / segment-aware routing, verbatim streaming reverse proxy with
 WebSocket passthrough, edge-header hygiene, health/readiness, the landing SPA served from the binary
-via Quinoa, native build, container image.
+via Quinoa, `/main-navigation` derived from the route table, native build, container image.
 
 Planned, per the epic's staging:
 

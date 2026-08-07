@@ -3,8 +3,8 @@ package eu.wohlben.qits.gateway.security;
 /**
  * The token-free surface: paths whose callers cannot hold a user token — workspace containers (git
  * clone/push, OTLP export, MCP), the cross-origin fixture SPA's capture POST, health probes — plus
- * the gateway's own {@code /api/auth/*} and {@code /api/config.json}, which anonymous browsers have
- * to be able to fetch before there is a session to speak of.
+ * the gateway's own {@code /api/auth/*}, {@code /api/config.json} and {@code /main-navigation},
+ * which anonymous browsers have to be able to fetch before there is a session to speak of.
  *
  * <p>Moved here from the monolith, and the reason it survives the move is worth stating:
  * "authentication moves to the edge" reads like it subsumes this list, and it does not. Workspace
@@ -63,8 +63,8 @@ public final class PublicPaths {
   }
 
   /**
-   * Paths this process serves itself. All three are fetched by a browser that has no session yet,
-   * or by an orchestrator that has no browser.
+   * Paths this process serves itself. Every one is fetched by a browser that has no session yet, or
+   * by an orchestrator that has no browser.
    */
   private static boolean gatewaysOwn(String path) {
     // The GATEWAY's health surface, and only the gateway's. It is the single published listener of
@@ -86,7 +86,13 @@ public final class PublicPaths {
         // The web components' pre-bootstrap config fetch (@qits/angular reads the base-relative
         // `api/config.json` before the app exists). Served here by ConfigJsonRoute — it has no
         // segment because the gateway has none.
-        || path.equals("/api/config.json");
+        || path.equals("/api/config.json")
+        // The platform's left navigation (NavigationRoute), for the same reason as the line above
+        // and in the same group: this process serves it, and it is fetched by a browser that has no
+        // session yet — the chrome renders before there is anything to authenticate. What it
+        // discloses is which segments this gateway routes, which is what the menu IS; a deployment
+        // that needs its topology secret does not have one it can publish a menu of.
+        || path.equals("/main-navigation");
   }
 
   /**
