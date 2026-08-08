@@ -206,4 +206,30 @@ class GatewayRoutingTest {
   void theGatewaysOwnManagementSurfaceIsNeverProxied() {
     given().when().get("/q/health/ready").then().statusCode(200).body("status", is("UP"));
   }
+
+  @Test
+  void anHtmlDocumentLeavesWithNoCacheWhateverTheUpstreamSaid() {
+    // The stub answers this path as Quarkus serves a SPA by default: text/html with the day-long
+    // immutable header. A browser holding yesterday's index.html for a day runs yesterday's
+    // application, so the edge rewrites the document — and only the document — to no-cache.
+    given()
+        .when()
+        .get("/artifacts/spa/deep/link")
+        .then()
+        .statusCode(200)
+        .contentType(containsString("text/html"))
+        .header("Cache-Control", is("no-cache"));
+  }
+
+  @Test
+  void aHashedAssetKeepsTheUpstreamCacheHeader() {
+    // Content-addressed names make immutable correct for the bundles the document names — the
+    // upstream's header passes through untouched.
+    given()
+        .when()
+        .get("/artifacts/spa/main-4RS6EA47.js")
+        .then()
+        .statusCode(200)
+        .header("Cache-Control", is("public, immutable, max-age=86400"));
+  }
 }
