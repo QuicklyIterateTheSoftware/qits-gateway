@@ -1,10 +1,14 @@
-# A worked example of the deployment topology this component exists for: the gateway is the ONLY
-# published listener, everything it fronts sits unpublished on the shared `qits-net` network and is
-# reached by DNS name. Copy it into the deployment that owns the qits stack — this file is an
-# example, not a runnable stack on its own (the `qits` service here is a placeholder for the real
-# qits app image).
+# A worked example of the deployment topology this component exists for: the gateway is the public
+# node of ONE environment, everything it fronts sits unpublished on the shared network and is
+# reached by DNS name. Copy it into the deployment that owns the stack — this file is an example,
+# not a runnable stack on its own (the upstreams below are not defined here).
 #
 #     docker compose -f docker-compose.example.yml up
+#
+# Upstream names come in two shapes, and the example spells prod because a gateway serves exactly
+# one environment:
+#   platform services   qits-platform-<name>       one instance for the whole platform
+#   env applications    <env>-qits-<app>           one instance per environment
 
 services:
   gateway:
@@ -17,27 +21,26 @@ services:
         # name whether it authenticates. `local` is EXPLICITLY UNAUTHENTICATED; never publish one.
         QITS_VARIANT: "oauth"
     ports:
-      # The single public port of the whole deployment.
+      # The single public port of this environment.
       - "8080:8080"
     environment:
-      # The catch-all: everything no service below claims goes to the qits monolith.
-      QITS_GATEWAY_APP_HOST: "qits"
-      QITS_GATEWAY_APP_PORT: "8080"
-      # Split-out services (the QitsService registry) — QITS_GATEWAY_PROXY_HOSTS_<SEGMENT>. The
-      # public path drops the qits- prefix (qits-artifacts -> /artifacts/*); the value is the
-      # container's qits-net name (host, or host:port). Uncomment each as its process goes live —
-      # callers see no difference, it is the same origin with a new upstream:
+      # The routed services (the QitsService registry) — QITS_GATEWAY_PROXY_HOSTS_<SEGMENT>. The
+      # public path drops the qits- prefix (qits-platform-artifacts -> /artifacts/*); the value is
+      # the container's network name (host, or host:port). There is no catch-all upstream and no
+      # derived default: an unnamed segment is simply not routed. Uncomment each as its process goes
+      # live — callers see no difference, it is the same origin with a new upstream:
       #
-      # The artifacts entry claims TWO prefixes. qits-artifacts serves the OCI registry at the
-      # root-level /v2 the Distribution API fixes (docker and podman accept no path prefix), so
+      # The artifacts entry claims TWO prefixes. qits-platform-artifacts serves the OCI registry at
+      # the root-level /v2 the Distribution API fixes (docker and podman accept no path prefix), so
       # enabling artifacts also routes /v2/* to the same container. There is no second key: a
       # QITS_GATEWAY_PROXY_HOSTS_V2 is still an "unknown qits service" startup error.
       #
       # A client pushing to that over plain HTTP needs the daemon-side opt-in — `insecure-registries`
       # in /etc/docker/daemon.json, or `insecure = true` in podman's registries.conf. That step
-      # disappears once this listener terminates TLS. See qits-artifacts' README.
-      # QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS: "qits-artifacts"
-      # QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY: "qits-observability"
+      # disappears once this listener terminates TLS. See qits-platform-artifacts' README.
+      # QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS: "qits-platform-artifacts"
+      # QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY: "prod-qits-observability"
+      # QITS_GATEWAY_PROXY_HOSTS_CI: "prod-qits-ci"
       #
       # A multi-word segment is dashed in the URL (/platform-deployments/*) and underscored here,
       # like every other env spelling. It reaches the route table because the gateway looks each
@@ -45,23 +48,13 @@ services:
       # QITS_GATEWAY_PROXY_HOSTS_PLATFORM_DEPLOYMENTS: "qits-platform-deployments"
     networks:
       - qits-net
-    depends_on:
-      - qits
-    restart: unless-stopped
-
-  qits:
-    image: qits/app:latest
-    # Deliberately NO `ports:` — qits is reachable only through the gateway and from sibling
-    # containers on qits-net. That is the whole point: one front door.
-    expose:
-      - "8080"
-    networks:
-      - qits-net
     restart: unless-stopped
 
 networks:
   qits-net:
-    # The shared network qits and every workspace container already join, so the gateway can address
-    # them all by DNS name with no host-port publishing.
+    # The shared network the fronted containers already join, so the gateway can address them all by
+    # DNS name with no host-port publishing. A deployed gateway is on more than one: as its
+    # environment's public node it joins the environment's bundle network and every per-application
+    # network in it.
     name: qits-net
     external: true

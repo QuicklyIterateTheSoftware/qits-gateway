@@ -120,17 +120,15 @@ public final class PublicPaths {
         // is guarded by the static qits.ci.token. Run reads are NOT public — step output is build
         // logs of a possibly private repository, so /ci/api/runs/… stays behind the policy.
         || path.startsWith("/ci/api/events/")
-        // NOTHING of qits-platform-deployments is here, nor of the qits-cd it supersedes, and both
-        // for the same reason. Their one machine intake (/platform-deployments/api/events/
-        // build-succeeded, formerly /cd/api/events/build-succeeded) is called by qits-ci directly
-        // on qits-net and never traverses the gateway, so no caller asks for a session-free
+        // NOTHING of qits-platform-deployments is here. Its one machine intake
+        // (/platform-deployments/api/events/build-succeeded) is called by qits-ci directly on the
+        // internal network and never traverses the gateway, so no caller asks for a session-free
         // front-door spelling — and without one there is no token scheme to carry either: the
-        // whole of /platform-deployments/* and /cd/* stays behind the session policy, and
-        // intra-network callers are trusted. The reads are a browser's, which has a session. If a
-        // deployment ever points qits-ci's qits.platform.deployments.intake-url through the
-        // gateway, an allowlist entry plus a write guard in the service come back TOGETHER (the
-        // /ci/api/events/ shape above); one without the other is either a dead token or an open
-        // intake.
+        // whole of /platform-deployments/* stays behind the session policy, and intra-network
+        // callers are trusted. The reads are a browser's, which has a session. If a deployment ever
+        // points qits-ci's qits.platform.deployments.intake-url through the gateway, an allowlist
+        // entry plus a write guard in the service come back TOGETHER (the /ci/api/events/ shape
+        // above); one without the other is either a dead token or an open intake.
         // OTLP ingest from workspace containers and fixture SPAs. The exporters append
         // /v1/<signal> to a literal endpoint, so the subtree is the unit.
         || path.startsWith("/observability/api/otel/")

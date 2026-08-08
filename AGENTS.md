@@ -80,7 +80,8 @@ build.
 
 ```
 src/main/java/eu/wohlben/qits/gateway/
-  QitsService.java            the registry: enum of proxyable services; segment/host derivation,
+  QitsService.java            the registry: enum of proxyable services; segment derivation (the
+                              upstream host is the deployment's to name, never derived here),
                               plus the extra root-level prefixes a service may claim (/v2), plus
                               the DISPLAY identity (navigation label + position; no label ⇒ no
                               menu entry). The ONLY place a service is declared — route order, not

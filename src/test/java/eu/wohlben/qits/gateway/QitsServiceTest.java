@@ -11,8 +11,8 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * The registry's derivation rules: public segment, path prefix, default container host, lookup —
- * plus the display identity the navigation is built from.
+ * The registry's derivation rules: public segment, path prefix, lookup — plus the display identity
+ * the navigation is built from.
  */
 class QitsServiceTest {
 
@@ -20,25 +20,20 @@ class QitsServiceTest {
   void thePublicIdentityDropsTheQitsPrefix() {
     assertEquals("artifacts", QitsService.ARTIFACTS.segment());
     assertEquals("/artifacts", QitsService.ARTIFACTS.pathPrefix());
-    // …while the default upstream is the submodule/container name, which keeps the prefix.
-    assertEquals("qits-artifacts", QitsService.ARTIFACTS.defaultHost());
   }
 
   @Test
   void aMultiWordServiceIsDashedEverywhereItIsRead() {
     // The enum spells the name with an underscore because Java requires it; nothing else may.
-    // name().toLowerCase() alone would put /platform_deployments in the URL and qits-platform_
-    // deployments on the network, and both are wrong.
+    // name().toLowerCase() alone would put /platform_deployments in the URL, which is wrong.
     assertEquals("platform-deployments", QitsService.PLATFORM_DEPLOYMENTS.segment());
     assertEquals("/platform-deployments", QitsService.PLATFORM_DEPLOYMENTS.pathPrefix());
-    assertEquals("qits-platform-deployments", QitsService.PLATFORM_DEPLOYMENTS.defaultHost());
     assertTrue(QitsService.forSegment("platform_deployments").isEmpty());
 
     // The second multi-word service, which is what makes the rule above a derivation rather than
     // one constant's special case.
     assertEquals("platform-docs", QitsService.PLATFORM_DOCS.segment());
     assertEquals("/platform-docs", QitsService.PLATFORM_DOCS.pathPrefix());
-    assertEquals("qits-platform-docs", QitsService.PLATFORM_DOCS.defaultHost());
   }
 
   @Test
@@ -131,15 +126,12 @@ class QitsServiceTest {
   }
 
   @Test
-  void aServiceWithNoClientAndASupersededOneCarryNoLabel() {
-    // Both omissions are decisions, and both are easy to mistake for oversights — stt is an API
-    // with no SPA behind it, and cd is superseded by platform-deployments, which carries the
-    // "Deployments" entry. The javadoc on each constant says so; this is what stops a well-meaning
+  void aServiceWithNoClientCarriesNoLabel() {
+    // The omission is a decision and is easy to mistake for an oversight — stt is an API with no
+    // SPA behind it. The javadoc on the constant says so; this is what stops a well-meaning
     // "completion" of the list from being green.
     assertTrue(QitsService.STT.navigationLabel().isEmpty());
-    assertTrue(QitsService.CD.navigationLabel().isEmpty());
     assertEquals(QitsService.NOT_IN_NAVIGATION, QitsService.STT.navigationPosition());
-    assertEquals(QitsService.NOT_IN_NAVIGATION, QitsService.CD.navigationPosition());
   }
 
   @Test
@@ -170,9 +162,9 @@ class QitsServiceTest {
   @Test
   void theRegistryRootIsNotAConfigurableSegment() {
     // This is the test that pins the whole "no phantom service" decision. Making /v2 an enum
-    // constant would have been simpler and wrong: it manufactures a service with a meaningless
-    // default host (qits-v2), a bogus row in the readiness payload, and a second proxy-hosts key a
-    // deployment has to hold in sync with the artifacts one.
+    // constant would have been simpler and wrong: it manufactures a service with a bogus row in the
+    // readiness payload and a second proxy-hosts key a deployment has to hold in sync with the
+    // artifacts one.
     assertTrue(QitsService.forSegment("v2").isEmpty());
   }
 }

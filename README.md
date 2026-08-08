@@ -236,30 +236,27 @@ The **service registry** — one entry per live split-out service, keyed by its 
 is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim. A service is routed
 **only** when it has a `proxy-hosts` entry, so undeployed services simply 404 rather than 502.
 
-| Service (submodule) | Segment | Reached at | Default host | Navigation ᶜ |
-| --- | --- | --- | --- | --- |
-| `qits-artifacts` | `artifacts` | `/artifacts/*`, `/v2/*` ᵃ | `qits-artifacts` | Artifacts (3) |
-| `qits-observability` | `observability` | `/observability/*` | `qits-observability` | Observability (7) |
-| `qits-workspaces` | `workspaces` | `/workspaces/*` | `qits-workspaces` | Workspaces (5) |
-| `qits-projects` | `projects` | `/projects/*` | `qits-projects` | Projects (4) |
-| `qits-stt` | `stt` | `/stt/*` | `qits-stt` | — |
-| `qits-events` | `events` | `/events/*` | `qits-events` | Events (6) |
-| `qits-ci` | `ci` | `/ci/*` | `qits-ci` | CI (1) |
-| `qits-cd` | `cd` | `/cd/*` | `qits-cd` | — |
-| `qits-platform-deployments` | `platform-deployments` | `/platform-deployments/*` | `qits-platform-deployments` | Deployments (2) |
-| `qits-platform-docs` | `platform-docs` | `/platform-docs/*` | `qits-platform-docs` | Docs (8) |
+| Service (submodule) | Segment | Reached at | Navigation ᶜ |
+| --- | --- | --- | --- |
+| `qits-platform-artifacts` | `artifacts` | `/artifacts/*`, `/v2/*` ᵃ | Artifacts (3) |
+| `qits-observability` | `observability` | `/observability/*` | Observability (7) |
+| `qits-workspaces` | `workspaces` | `/workspaces/*` | Workspaces (5) |
+| `qits-projects` | `projects` | `/projects/*` | Projects (4) |
+| `qits-stt` | `stt` | `/stt/*` | — |
+| `qits-events` | `events` | `/events/*` | Events (6) |
+| `qits-ci` | `ci` | `/ci/*` | CI (1) |
+| `qits-platform-deployments` | `platform-deployments` | `/platform-deployments/*` | Deployments (2) |
+| `qits-platform-docs` | `platform-docs` | `/platform-docs/*` | Docs (8) |
 
 ᵃ `/v2/*` is the OCI registry root, claimed by the artifacts entry rather than by a key of its own —
 see "The routing model". It is the only prefix in the system that is not a service segment.
 
 ᶜ The label and place this service takes in [`/main-navigation`](#main-navigation) when it is routed;
-`—` means it is routable but never shown. `stt` is an API with no SPA behind it, and `cd` is
-superseded by `platform-deployments`, which carries the *Deployments* entry — so a platform old
-enough to still route `cd` shows one link rather than two meaning the same thing.
+`—` means it is routable but never shown. `stt` is an API with no SPA behind it.
 
-`qits-platform-deployments` supersedes `qits-cd` — it owns environment topology and deployment
-execution in one service. The `cd` entry stays in the registry because a platform deployed before
-that cutover still names it; nothing new configures it.
+`qits-platform-deployments` owns environment topology and deployment execution in one service. It
+replaced the retired `qits-cd`, whose `cd` segment is gone from the registry — a `proxy-hosts.cd`
+entry is now an "unknown qits service" startup error.
 
 `qits-platform-docs` serves the documentation sites qits-artifacts holds and stores nothing of its
 own — it resolves a site's newest version and streams the bytes through. So it is a *view*, and
@@ -269,14 +266,16 @@ published.
 A **multi-word segment is dashed**, in the URL and in the container name alike: the underscore in
 `PLATFORM_DEPLOYMENTS` is Java's spelling of an enum constant and appears nowhere else.
 
-(The "default host" is the container's `qits-net` DNS name — what you would normally put in the
-`proxy-hosts` value. Add a service to the enum when a new component splits out.) As environment
-variables:
+**The upstream host is not derived from the segment, and the registry no longer offers a default
+one.** A platform service answers to its own name (`qits-platform-artifacts`); an application of an
+environment answers to `<env>-qits-<app>` (`prod-qits-ci`), and the image does not know which
+environment it was deployed into. The deployment names every host, in full. Add a service to the
+enum when a new component splits out. As environment variables, for a gateway serving `prod`:
 
 ```bash
-QITS_GATEWAY_APP_HOST=qits
-QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS=qits-artifacts
-QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY=qits-observability:9000   # host:port when not on 8080
+QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS=qits-platform-artifacts
+QITS_GATEWAY_PROXY_HOSTS_CI=prod-qits-ci
+QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY=prod-qits-observability:9000   # host:port when not on 8080
 QITS_GATEWAY_PROXY_HOSTS_PLATFORM_DEPLOYMENTS=qits-platform-deployments   # dashed segment
 ```
 

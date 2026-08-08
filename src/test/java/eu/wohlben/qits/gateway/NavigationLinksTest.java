@@ -63,17 +63,14 @@ class NavigationLinksTest {
 
   @Test
   void anUnlabelledServiceIsRoutedButNotNavigable() {
-    // stt has no SPA behind it and cd is superseded by platform-deployments. Both are routable, and
-    // neither has a page to send a user to.
-    assertEquals(
-        List.of("Home"), labels(NavigationRoute.links(routesFor(QitsService.STT, QitsService.CD))));
+    // stt has no SPA behind it: it is routable, and it has no page to send a user to.
+    assertEquals(List.of("Home"), labels(NavigationRoute.links(routesFor(QitsService.STT))));
 
-    // …and the one that supersedes cd is the one that carries the label, on the same table.
+    // …and a labelled service on the same table is unaffected by it.
     assertEquals(
         List.of("Home", "Deployments"),
         labels(
-            NavigationRoute.links(
-                routesFor(QitsService.CD, QitsService.PLATFORM_DEPLOYMENTS, QitsService.STT))));
+            NavigationRoute.links(routesFor(QitsService.PLATFORM_DEPLOYMENTS, QitsService.STT))));
   }
 
   @Test

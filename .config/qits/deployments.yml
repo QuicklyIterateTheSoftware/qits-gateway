@@ -7,5 +7,10 @@
 deployment_target: environment
 deploy_branches: environment/prod
 
+# PUBLIC NODE: every environment's gateway is that environment's public node. It joins the
+# environment's bundle network and every per-application network in it, and those joins are how
+# it reaches its own environment's applications once the legacy network is empty.
+available_on_env: true
+
 # The gateway owns the root path space, so the convention /gateway/q/health/ready would 404.
 health_path: /q/health/ready

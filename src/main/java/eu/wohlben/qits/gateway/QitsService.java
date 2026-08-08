@@ -13,16 +13,20 @@ import java.util.stream.Stream;
  *
  * <p>Each constant is a service the qits monorepo carries as a {@code services/qits-*} submodule.
  * The <b>public</b> identity of a service drops the {@code qits-} prefix: {@code qits-artifacts} is
- * reached at {@code /artifacts/*} and, by default, forwarded to the {@code qits-artifacts}
- * container on the shared docker network. So the enum ties four things together for a service:
+ * reached at {@code /artifacts/*}. So the enum ties three things together for a service:
  *
  * <ul>
  *   <li>its {@link #segment() public path segment} ({@code artifacts}),
- *   <li>the {@link #pathPrefix() inbound prefix} it claims ({@code /artifacts}),
- *   <li>its {@link #defaultHost() default upstream container name} ({@code qits-artifacts}), and
+ *   <li>the {@link #pathPrefix() inbound prefix} it claims ({@code /artifacts}), and
  *   <li>its {@link #navigationLabel() display label} and {@link #navigationPosition() place} in the
  *       platform's left navigation ({@code Artifacts}, third) — <b>if</b> it has one.
  * </ul>
+ *
+ * <p><b>The upstream host is not one of them.</b> A route's target is named by the deployment and
+ * derived from nothing here: a platform service answers to {@code qits-platform-artifacts}, an
+ * environment service to {@code <env>-qits-<app>} ({@code prod-qits-ci}), and the environment is
+ * not knowable at build time. The enum says what a segment <i>is</i>; configuration says where it
+ * lives.
  *
  * <p><b>Why display identity lives here too.</b> {@code @qits/ui-components} used to hardcode the
  * navigation as a compile-time list of eight {@code {label, href}} entries in a published npm
@@ -63,15 +67,6 @@ public enum QitsService {
   STT,
   EVENTS("Events", 6),
   CI("CI", 1),
-  /**
-   * qits-cd, superseded by {@link #PLATFORM_DEPLOYMENTS} and kept because a platform deployed
-   * before that cutover still names this segment. Nothing new configures it.
-   *
-   * <p><b>Unlabelled on purpose</b>, and not by oversight: {@code PLATFORM_DEPLOYMENTS} carries the
-   * "Deployments" entry now. A deployment old enough to still route {@code cd} would otherwise show
-   * two links meaning the same thing, and the one being retired would be the one a user clicks.
-   */
-  CD,
   /** qits-platform-deployments — environment topology plus deployment execution, in one service. */
   PLATFORM_DEPLOYMENTS("Deployments", 2),
   /**
@@ -97,7 +92,7 @@ public enum QitsService {
 
   /**
    * A service with no navigation entry — the plain spelling, so a constant stays as short as what
-   * it declares. {@code STT} and {@code CD} are both written this way and both say above why.
+   * it declares. {@code STT} is written this way and says above why.
    */
   QitsService(String... extraPrefixes) {
     this(null, NOT_IN_NAVIGATION, extraPrefixes);
@@ -149,22 +144,12 @@ public enum QitsService {
   }
 
   /**
-   * The default upstream host: the service's DNS name on the shared {@code qits-net} docker
-   * network, which is the submodule name — e.g. {@code "qits-artifacts"}. A deployment may point
-   * the route elsewhere via {@code qits.gateway.proxy-hosts.<segment>}.
-   */
-  public String defaultHost() {
-    return "qits-" + segment();
-  }
-
-  /**
    * The label the platform's left navigation shows for this service, or empty when the service is
    * not in the navigation at all.
    *
    * <p><b>Empty is the switch</b>, not a fallback: a constant with no label produces no link, and
    * nothing derives one from the segment. That is what lets a segment be routable without being
-   * navigable — an API with no client ({@code stt}) and a superseded segment kept for an old
-   * deployment ({@code cd}) are both routed and neither belongs in a menu.
+   * navigable — {@code stt} is an API with no client, so it is routed and belongs in no menu.
    *
    * <p>The label is not the segment title-cased, deliberately: {@code CI} is two capitals and
    * {@code platform-deployments} is shown as "Deployments". A user reads the label and a machine

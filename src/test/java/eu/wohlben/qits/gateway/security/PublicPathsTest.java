@@ -152,24 +152,11 @@ class PublicPathsTest {
     }
 
     @Test
-    void nothingOfCdIsPublic() {
-      // Deliberate, and different from ci: qits-ci's build-succeeded notifier dials qits-cd
-      // directly on qits-net and never traverses the gateway, so even the intake has no
-      // session-free front-door spelling — and correspondingly no token guard in the service.
-      // Allowlisting it here without restoring that guard would open the intake to the internet;
-      // this test is what makes that a conscious pair of changes.
-      assertFalse(PublicPaths.isPublic("GET", "/cd/api/events/build-succeeded"));
-      assertFalse(PublicPaths.isPublic("GET", "/cd/api/environments"));
-      assertFalse(PublicPaths.isPublic("GET", "/cd/api/deployments"));
-      assertFalse(PublicPaths.isPublic("GET", "/cd/api"));
-    }
-
-    @Test
     void nothingOfPlatformDeploymentsIsPublic() {
-      // qits-platform-deployments supersedes qits-cd and inherits its posture exactly: the intake
-      // is an intra-network call from qits-ci, and the reads are a browser's, so the whole segment
-      // stays behind the session policy. Same pairing rule as above — a front-door intake spelling
-      // and a write guard in the service arrive together or not at all.
+      // Deliberate, and different from ci: the intake is an intra-network call from qits-ci, and
+      // the reads are a browser's, so the whole segment stays behind the session policy. The intake
+      // has no session-free front-door spelling and correspondingly no token guard in the service,
+      // so a front-door spelling and a write guard arrive together or not at all.
       assertFalse(PublicPaths.isPublic("GET", "/platform-deployments/api/events/build-succeeded"));
       assertFalse(PublicPaths.isPublic("GET", "/platform-deployments/api/environments"));
       assertFalse(PublicPaths.isPublic("GET", "/platform-deployments/api/deployments"));
