@@ -13,7 +13,7 @@
 # why the halves are split, and it is why this step's image is node-docker-base rather than ci-base:
 # it needs node, npm and git for half one and the docker CLI for half two.
 #
-# Publish it under the tag that is the whole contract with qits-cd —
+# Publish it under the tag that is the whole contract with qits-deployments —
 # <registry>/<repository>/<this repo's name>:<sha>. The step's own container only drives the docker
 # CLI; the build and the push happen in the host's daemon through the socket this step declares
 # (docker: true). A failed push is a failed step is a FAILED run.
@@ -56,9 +56,10 @@ steps:
       # npm's own knob for exactly this, `--replace-registry-host=always`, cannot do it against a
       # registry mounted under a path. @npmcli/arborist glues rather than resolves (reify.js:
       # `registry.slice(0, -1) + resolvedURL.pathname`), so
-      # http://qits-artifacts:8080/artifacts/npm/npmjs/ + /artifacts/npm/npmjs/zone.js/-/…tgz comes
-      # out as …/artifacts/npm/npmjs/artifacts/npm/npmjs/zone.js/-/…tgz and every tarball 404s.
-      # Measured on npm 10.9.4.
+      # http://qits-platform-artifacts:8080/artifacts/npm/npmjs/ +
+      # /artifacts/npm/npmjs/zone.js/-/…tgz comes out as
+      # …/artifacts/npm/npmjs/artifacts/npm/npmjs/zone.js/-/…tgz and every tarball 404s. Measured
+      # on npm 10.9.4.
       #
       # The origin is derived from the injected env rather than spelled here: no repository states a
       # deployment's addresses, and the one address qits-spa-home does state (localhost:8081, in its
