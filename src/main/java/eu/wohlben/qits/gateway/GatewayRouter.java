@@ -151,6 +151,9 @@ public class GatewayRouter {
               .origin(route.port(), route.host())
               .addInterceptor(edgeHeaders));
     }
+    // Order 0: before every document handler (the SPA's static assets at 1060, its fallback at
+    // 40_000, the proxy above), so the headers-end hook exists whichever of them answers.
+    router.route().order(0).handler(HtmlCacheControl::install);
     router.route().order(ROUTE_ORDER).handler(this::handle);
   }
 

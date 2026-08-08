@@ -93,6 +93,26 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
             out.write(bytes);
           }
         });
+    // An upstream SPA, as Quarkus serves one by default: the document and the hashed bundle both
+    // carry the day-long immutable header. What the gateway must do with each differs, and
+    // GatewayRoutingTest asserts exactly that split — rewrite the document, pass the asset through.
+    server.createContext(
+        "/artifacts/spa",
+        exchange -> {
+          exchange.getRequestBody().transferTo(OutputStream.nullOutputStream());
+          boolean asset = exchange.getRequestURI().getPath().endsWith(".js");
+          byte[] bytes =
+              (asset ? "console.log('stub')" : "<!doctype html><title>stub</title>")
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange
+              .getResponseHeaders()
+              .set("Content-Type", asset ? "application/javascript" : "text/html; charset=utf-8");
+          exchange.getResponseHeaders().set("Cache-Control", "public, immutable, max-age=86400");
+          exchange.sendResponseHeaders(200, bytes.length);
+          try (OutputStream out = exchange.getResponseBody()) {
+            out.write(bytes);
+          }
+        });
     server.start();
 
     int port = server.getAddress().getPort();
