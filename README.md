@@ -96,13 +96,15 @@ Forwarding is **verbatim**: the upstream sees the path unchanged (`/artifacts/bl
 qits-artifacts as `/artifacts/blobs`), so a service and the qits SPA both get exactly the paths they
 serve and nothing breaks apps that emit absolute-root asset URLs.
 
-The one response-side exception is `Cache-Control` on HTML documents. Quarkus' static-resource
-default is `public, immutable, max-age=86400` — correct for the hash-named bundles, wrong for the
-`index.html` that names them: a browser kept yesterday's document for a day and ran yesterday's
-application. `HtmlCacheControl` rewrites every `text/html` response leaving the gateway — proxied
-or the landing SPA's own — to `Cache-Control: no-cache` (revalidation stays; a 304 costs one round
-trip). Everything that is not an HTML document keeps the upstream's header, so the immutable year
-on hashed assets survives.
+The one response-side exception is `Cache-Control`, and only one value of it: Quarkus'
+static-resource default, `public, immutable, max-age=86400`. That blanket is correct exactly where
+the filename is content-hashed (a new build names a new file) and wrong everywhere else — the
+`index.html` that names the bundles, favicons, logos, i18n files — where it made a browser keep
+yesterday's file for a day. `EdgeCacheControl` rewrites the default to `Cache-Control: no-cache`
+(revalidation stays; a 304 costs one round trip) unless the path ends in Angular's hash shape
+(`main-4RS6EA47.js`). A header a handler *chose* is a decision and passes through untouched —
+`no-store` on the machine routes is never weakened, the git protocol's own caching is never
+touched, and an upstream that deliberately marks a response cacheable stays marked.
 
 ## The landing SPA
 
@@ -123,7 +125,7 @@ SPA's two halves rather than sitting behind both:
 
 | Order | Route | Claims |
 | --- | --- | --- |
-| 0 | `HtmlCacheControl` | nothing — installs a headers-end hook and yields |
+| 0 | `EdgeCacheControl` | nothing — installs a headers-end hook and yields |
 | 100 | `ConfigJsonRoute`, `AuthMeRoute`, `NavigationRoute` | `/api/config.json`, `/api/auth/me`, `/main-navigation` |
 | 1060 | Quinoa's generated static resources | the bundle's own files (`/`, `/index.html`, `/main-*.js`, …) |
 | 10 000 | `RouteConstants.ROUTE_ORDER_DEFAULT` | where an unordered route would land |

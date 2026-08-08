@@ -211,7 +211,7 @@ class GatewayRoutingTest {
   void anHtmlDocumentLeavesWithNoCacheWhateverTheUpstreamSaid() {
     // The stub answers this path as Quarkus serves a SPA by default: text/html with the day-long
     // immutable header. A browser holding yesterday's index.html for a day runs yesterday's
-    // application, so the edge rewrites the document — and only the document — to no-cache.
+    // application, so the edge rewrites the static default to no-cache.
     given()
         .when()
         .get("/artifacts/spa/deep/link")
@@ -222,14 +222,26 @@ class GatewayRoutingTest {
   }
 
   @Test
-  void aHashedAssetKeepsTheUpstreamCacheHeader() {
-    // Content-addressed names make immutable correct for the bundles the document names — the
-    // upstream's header passes through untouched.
+  void aHashNamedFileKeepsTheImmutableDefault() {
+    // A content-hashed name is the one place immutable is correct — a new build names a new file —
+    // so the upstream's header passes through untouched.
     given()
         .when()
         .get("/artifacts/spa/main-4RS6EA47.js")
         .then()
         .statusCode(200)
         .header("Cache-Control", is("public, immutable, max-age=86400"));
+  }
+
+  @Test
+  void anUnhashedAssetCarryingTheStaticDefaultRevalidates() {
+    // The favicon's name never changes, so the day-long default would pin yesterday's file exactly
+    // like it pinned the document. Not being HTML earns no exemption — only a hashed name does.
+    given()
+        .when()
+        .get("/artifacts/spa/favicon.ico")
+        .then()
+        .statusCode(200)
+        .header("Cache-Control", is("no-cache"));
   }
 }
