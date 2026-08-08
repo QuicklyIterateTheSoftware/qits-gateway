@@ -55,16 +55,23 @@ WebSocket upgrades are forwarded by default. That is what keeps SSE channels, th
 protocol, dev-server HMR sockets and large artifact uploads working through the hub.
 
 ```
-                       ┌─────────────────────────────────────────────┐
-   client ──:8080──▶   │  qits-gateway   (the only published port)   │
-                       │   route table  ·  edge headers  ·  health   │
-                       └───────┬───────────────┬──────────────┬──────┘
-                               │  qits-net (DNS names, nothing published)
-                     /artifacts│  /observability│             /│
+   client ──▶ qits-platform-edge ──▶  ┌───────────────────────────────────────┐
+              (binds the host port)   │  qits-gateway                         │
+                                      │   route table · edge headers · health │
+                                      └───────┬───────────────┬──────────┬────┘
+                                              │  qits-net (DNS names, nothing published)
+                                    /artifacts│  /observability│         /│
                       ┌────────▼──────┐ ┌────────▼──────────┐ ┌─────▼───────────┐
                       │ qits-artifacts│ │qits-observability │ │ qits (app + SPA)│
                       └───────────────┘ └───────────────────┘ └─────────────────┘
 ```
+
+**The gateway is one origin, not necessarily the outermost hop.** `qits-platform-edge` binds the
+host port and forwards here, so the gateway sees the edge's address as its peer and the client's
+only in the `X-Forwarded-*` set the edge wrote. Everything below still holds when the edge is absent
+and a client reaches the gateway directly — that deployment is supported and unchanged — but no code
+here may assume it. The one place the difference is load-bearing is the [header
+contract](#security-posture).
 
 A service may claim **one additional, root-level prefix** when a protocol client hardcodes an
 address the gateway does not get to choose. There is exactly one today: `qits-artifacts` also claims
@@ -293,7 +300,7 @@ Edge headers:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `qits.gateway.forwarded.enabled` | `true` | emit `X-Forwarded-For`/`-Proto`/`-Host`/`-Port` |
+| `qits.gateway.forwarded.enabled` | `true` | maintain `X-Forwarded-For`/`-Proto`/`-Host`/`-Port` (append to the first, set the rest when absent) |
 | `qits.gateway.forwarded.strip-request-headers` | the identity headers below | request headers dropped from every inbound request |
 
 The shipped `application.properties` enables **nothing**: it carries the whole enum as commented
@@ -327,13 +334,34 @@ exchanges pass through here).
   sends a Basic header on *pulls* too, and it must neither be eaten nor turned into a challenge on a
   public path. Note the deliberate asymmetry with the WebSocket rule below, which drops it: a
   handshake is a protocol negotiation, not a request an upstream answers.
-- **`X-Forwarded-For` is set, not appended** — the gateway is the outermost hop, so any inbound value
-  is client-supplied and worthless.
+- **`X-Forwarded-For` is appended to, and `-Host`/`-Proto`/`-Port` are set only when absent.**
+  Ordinary multi-hop semantics. This used to be an unconditional set, justified by the gateway being
+  the outermost hop; `qits-platform-edge` now binds the host port in front of it, so that set
+  replaced the real client's address with the edge container's on every request and nothing
+  downstream could recover it. The chain reads oldest first, so the **first** entry is the original
+  client and every later one is a proxy — anything that wants a client address must read the first,
+  never the last. Nothing in this repository reads the header; the gateway only writes it.
+
+  `-Host`, `-Proto` and `-Port` describe the address the client actually typed, which only the
+  outermost hop saw: the edge terminates TLS and forwards the original `Host`, so overwriting them
+  here would tell every upstream the exchange was plain `http` to whatever name this hop was dialled
+  by. With nothing in front of the gateway no inbound value exists, "set if absent" is "set", and a
+  direct deployment behaves exactly as it did before.
+
+  The trade-off is the one every reverse proxy makes: a chain is only as trustworthy as the hops
+  that wrote it, and a client reaching the gateway directly can invent the whole prefix. Trust comes
+  from knowing what fronts the deployment, never from the header.
 - **A WebSocket handshake forwards an allow-list, not everything-minus-the-prefix.** Only the RFC
   6455 handshake headers (`Upgrade`, `Connection`, `Sec-WebSocket-*`, `Host`) plus `Origin` survive;
   the gateway then asserts `X-Qits-*` and `X-Forwarded-*` on top. Everything else the client sent is
   dropped, **including `Cookie` and `Authorization`** — authentication terminates here and no
   upstream authenticates by either, so neither has any business travelling further.
+
+  **The `X-Forwarded-*` set is the one exception**, carried across the rebuild rather than dropped
+  and then extended exactly as on an ordinary request. It is still not on the allow-list, which
+  stays the handshake and nothing else. Without this a socket would restart the chain, and the
+  workspace terminals, agent chats and HMR channels — every WebSocket on the platform — would be the
+  only traffic attributed to the edge's own address rather than to whoever opened them.
 
   This needs its own rule because `vertx-http-proxy` short-circuits an upgrade *before* installing
   its interceptor chain, so the ordinary strip-and-inject never ran on a handshake at all. Until it

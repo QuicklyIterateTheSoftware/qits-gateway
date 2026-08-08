@@ -178,6 +178,13 @@ exception once" is how the monolith's catch-all comes back:
   `qits.gateway.forwarded.strip-request-headers` is the separate compatibility list for a
   forward-auth proxy's own header names — it may be extended, never shrunk below what a proxy
   fronting the gateway injects.
+- **The gateway is not the outermost hop any more.** `qits-platform-edge` binds the host port and
+  forwards here, so the gateway's peer address is the edge's, not the client's. `X-Forwarded-For` is
+  therefore **appended** to and `-Host`/`-Proto`/`-Port` are **set only when absent** — never
+  overwritten, which is what used to discard the real client on every request. The chain reads
+  oldest first, so a reader wanting a client address takes the **first** entry; nothing here reads
+  it today, and a new consumer that takes the last would be reading a proxy. Reaching the gateway
+  directly is still supported: with no inbound value, "append" is "set" and nothing changes.
 - Put edge-case logic (prefix matching, segment validation, host:port parsing, the reserved-header
   predicate) on the framework-free value types so it stays unit testable without booting the
   application; `RouteTableTest` and `EdgeHeadersTest` are where those cases belong.

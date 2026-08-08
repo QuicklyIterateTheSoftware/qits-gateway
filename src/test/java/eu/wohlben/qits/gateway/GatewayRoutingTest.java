@@ -86,6 +86,9 @@ class GatewayRoutingTest {
 
   @Test
   void describesTheOriginalClientToTheUpstream() {
+    // The direct deployment: nothing fronts the gateway, so no chain arrives and the gateway's own
+    // peer is the whole of it. This is the case that must not change now that the header is
+    // appended rather than set.
     given()
         .when()
         .get("/artifacts/x")
@@ -94,6 +97,49 @@ class GatewayRoutingTest {
         .body(containsString("x-forwarded-proto=http"))
         .body(containsString("x-forwarded-for=127.0.0.1"))
         .body(not(containsString("x-forwarded-host=-")));
+  }
+
+  @Test
+  void behindTheEdgeTheRealClientSurvivesInsteadOfBeingOverwritten() {
+    // qits-platform-edge binds the host port and forwards here, so the gateway is no longer the
+    // outermost hop. It used to SET this header on the grounds that it was — which behind the edge
+    // meant every upstream saw the edge container's address and the real client was unrecoverable.
+    // Appended now: the client stays FIRST and this hop signs after it.
+    given()
+        .header("X-Forwarded-For", "203.0.113.7")
+        .when()
+        .get("/artifacts/x")
+        .then()
+        .statusCode(200)
+        .body(containsString("x-forwarded-for=203.0.113.7, 127.0.0.1"));
+  }
+
+  @Test
+  void aChainThatAlreadyNamesSeveralProxiesIsExtendedNotRestarted() {
+    given()
+        .header("X-Forwarded-For", "203.0.113.7, 198.51.100.4")
+        .when()
+        .get("/artifacts/x")
+        .then()
+        .statusCode(200)
+        .body(containsString("x-forwarded-for=203.0.113.7, 198.51.100.4, 127.0.0.1"));
+  }
+
+  @Test
+  void whatTheOuterHopSawOfTheAddressIsLeftAlone() {
+    // -Host and -Proto describe the address the client actually typed, and only the outermost hop
+    // saw it. The edge terminates TLS, so overwriting -Proto here would tell every upstream the
+    // exchange was plain http; it forwards the original Host, so overwriting -Host would replace a
+    // public name with whatever this hop was dialled by.
+    given()
+        .header("X-Forwarded-Proto", "https")
+        .header("X-Forwarded-Host", "qits.example")
+        .when()
+        .get("/artifacts/x")
+        .then()
+        .statusCode(200)
+        .body(containsString("x-forwarded-proto=https"))
+        .body(containsString("x-forwarded-host=qits.example"));
   }
 
   @Test

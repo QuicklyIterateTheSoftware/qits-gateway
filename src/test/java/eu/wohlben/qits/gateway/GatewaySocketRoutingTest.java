@@ -110,6 +110,23 @@ class GatewaySocketRoutingTest {
   }
 
   @Test
+  void aSocketBehindTheEdgeCarriesTheRealClientThroughTheRebuild() throws Exception {
+    // The forwarded set is the one thing the allow-list rebuild carries across rather than drops,
+    // and this is why. Every workspace terminal and agent chat opens through here; a handshake that
+    // restarted the chain would make sockets the only traffic on the platform attributed to
+    // qits-platform-edge's own address rather than to whoever opened them.
+    String seen =
+        handshake(
+            builder ->
+                builder
+                    .header("X-Forwarded-For", "203.0.113.7")
+                    .header("X-Forwarded-Proto", "https"));
+
+    assertLine(seen, "x-forwarded-for=203.0.113.7, 127.0.0.1");
+    assertLine(seen, "x-forwarded-proto=https");
+  }
+
+  @Test
   void theHandshakeItselfStillReachesTheUpstream() throws Exception {
     // The negative case for the allow-list: rebuild too aggressively and the upgrade never
     // completes at all. Getting a frame back at all is what proves Sec-WebSocket-* survived.

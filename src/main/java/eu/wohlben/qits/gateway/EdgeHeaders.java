@@ -35,9 +35,11 @@ import java.util.Set;
  *       the trusted value has to be downstream of the code that removes the forged one. An
  *       anonymous request asserts nothing, which is how an upstream sees "no name" rather than a
  *       name it cannot trust.
- *   <li><b>Describe the original client</b> with the {@code X-Forwarded-*} set. {@code
- *       X-Forwarded-For} is <i>set</i>, not appended: the gateway is the outermost hop, so any
- *       inbound value is client-supplied and worthless.
+ *   <li><b>Describe the original client</b> with the {@code X-Forwarded-*} set, using ordinary
+ *       multi-hop semantics — see {@link #describeOriginalClient}. The gateway is no longer the
+ *       outermost hop: {@code qits-platform-edge} binds the host port and forwards to this process,
+ *       so an inbound {@code X-Forwarded-For} names the real client and must be extended rather
+ *       than overwritten.
  * </ol>
  *
  * <p>Nothing here is route-specific, so a single instance is shared across every proxy.
@@ -96,6 +98,14 @@ final class EdgeHeaders implements ProxyInterceptor {
           // which origin opened the socket. It is client-supplied and must be read as such.
           "origin");
 
+  /**
+   * The forwarded set the gateway maintains. Listed so {@link #applyToUpgrade} can carry an outer
+   * hop's values across its allow-list rebuild — they are deliberately <b>not</b> on {@link
+   * #UPGRADE_HEADERS}, which is the handshake and nothing else.
+   */
+  private static final List<String> FORWARDED_HEADERS =
+      List.of("X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "X-Forwarded-Port");
+
   private final GatewayConfig.Forwarded forwarded;
 
   EdgeHeaders(GatewayConfig.Forwarded forwarded) {
@@ -111,6 +121,38 @@ final class EdgeHeaders implements ProxyInterceptor {
     return name != null
         && name.length() > RESERVED_PREFIX.length()
         && name.regionMatches(true, 0, RESERVED_PREFIX, 0, RESERVED_PREFIX.length());
+  }
+
+  /**
+   * The {@code X-Forwarded-For} value to send upstream: {@code peer} <b>appended</b> to whatever an
+   * outer hop already recorded, or {@code peer} alone when nothing did. Returns {@code null} when
+   * there is nothing to write at all, which is the signal to leave the header off.
+   *
+   * <p>This is the whole of the multi-hop rule, and it replaced an unconditional set. The gateway
+   * used to be the outermost hop, so an inbound value could only be client-supplied and overwriting
+   * it was correct. {@code qits-platform-edge} now binds the host port in front of this process, so
+   * the same overwrite would replace the real client's address with the edge container's on every
+   * request.
+   *
+   * <p>The list reads left to right, oldest first, so the <b>first</b> entry is the original client
+   * and every later one is a proxy that handled the request. Anything here that ever wants "the
+   * client address" must read that first entry, never the last. Nothing in this repository reads
+   * the header today.
+   *
+   * <p>The trade-off is the one every reverse proxy makes: a chain is only as trustworthy as the
+   * hops that wrote it. With nothing in front of the gateway a client can invent the whole prefix.
+   * Trust comes from knowing what fronts the deployment, never from the header.
+   *
+   * <p>Framework-free on purpose — it is the edge-case surface of the rule, and {@code
+   * EdgeHeadersTest} pins it without booting the application.
+   */
+  static String forwardedFor(String existing, String peer) {
+    String chain = existing == null ? "" : existing.trim();
+    String hop = peer == null ? "" : peer.trim();
+    if (hop.isEmpty()) {
+      return chain.isEmpty() ? null : chain;
+    }
+    return chain.isEmpty() ? hop : chain + ", " + hop;
   }
 
   /**
@@ -155,6 +197,13 @@ final class EdgeHeaders implements ProxyInterceptor {
    * cookie, and a session cookie is exactly the sort of thing that should not travel further than
    * it has to.
    *
+   * <p><b>The one exception to the rebuild</b> is the {@code X-Forwarded-*} set, which is carried
+   * across it rather than dropped. It is not on {@link #UPGRADE_HEADERS} — that list stays the
+   * handshake and nothing else — but a chain the edge wrote names the real client, and a socket
+   * that restarted it would be the one thing on the platform attributed to the edge's own address.
+   * It is client-supplied when nothing fronts the gateway, exactly as on an ordinary request, which
+   * is what {@link #forwardedFor} spells out.
+   *
    * <p>Strip and inject stay in one method here for the same reason they do below — the forged
    * header and the trusted one have the same name, so the code that writes the trusted value must
    * be downstream of the code that removes the forged one. {@code GatewayRouter} calls this; it
@@ -164,6 +213,23 @@ final class EdgeHeaders implements ProxyInterceptor {
    */
   void applyToUpgrade(HttpServerRequest inbound) {
     MultiMap headers = inbound.headers();
+
+    // The allow-list is about to drop the forwarded set with everything else, so keep it: a socket
+    // opened through the edge must name the same client an ordinary request through the edge does,
+    // or the workspace terminals become the one thing on the platform attributed to the edge's own
+    // address. Put back below, then extended by describeOriginalClient exactly as on a request.
+    // Left empty when the deployment emits no forwarded set at all, so the restore is a no-op and
+    // the handshake keeps dropping what the client sent.
+    MultiMap outerHops = MultiMap.caseInsensitiveMultiMap();
+    if (forwarded.enabled()) {
+      for (String name : FORWARDED_HEADERS) {
+        List<String> values = headers.getAll(name);
+        if (!values.isEmpty()) {
+          outerHops.set(name, values);
+        }
+      }
+    }
+
     // Snapshot the names first: removing from the map while iterating its own name view would
     // otherwise skip entries.
     for (String name : List.copyOf(headers.names())) {
@@ -181,19 +247,55 @@ final class EdgeHeaders implements ProxyInterceptor {
       }
     }
 
-    if (forwarded.enabled()) {
-      SocketAddress remote = inbound.remoteAddress();
-      if (remote != null && remote.hostAddress() != null) {
-        headers.set("X-Forwarded-For", remote.hostAddress());
+    headers.addAll(outerHops);
+    describeOriginalClient(headers, inbound);
+  }
+
+  /**
+   * Write the {@code X-Forwarded-*} set into {@code headers}, which must already hold whatever the
+   * inbound request carried. Both entry points end here, so an ordinary request and a handshake
+   * describe their client identically.
+   *
+   * <p>{@code X-Forwarded-For} is <b>appended</b> to (see {@link #forwardedFor}). The other three
+   * are <b>set only when absent</b>: they describe the address the client actually typed, which the
+   * outermost hop is the only one that saw. The edge terminates TLS and forwards the original
+   * {@code Host}, so overwriting {@code -Proto} here would turn every {@code https} exchange into
+   * {@code http} for the upstream that reads it.
+   *
+   * <p>With nothing in front of the gateway no inbound value exists, "set if absent" is "set", and
+   * a direct deployment behaves exactly as it did before the edge.
+   *
+   * <p>Repeated header lines are joined the way the RFC reads them — one comma-separated list — so
+   * a client cannot split a chain across two lines and have only one of them survive.
+   */
+  private void describeOriginalClient(MultiMap headers, HttpServerRequest inbound) {
+    if (!forwarded.enabled()) {
+      return;
+    }
+
+    SocketAddress remote = inbound.remoteAddress();
+    String chain =
+        forwardedFor(
+            String.join(", ", headers.getAll("X-Forwarded-For")),
+            remote == null ? null : remote.hostAddress());
+    if (chain != null) {
+      headers.set("X-Forwarded-For", chain);
+    }
+
+    setIfAbsent(headers, "X-Forwarded-Proto", inbound.scheme() == null ? "http" : inbound.scheme());
+    HostAndPort authority = inbound.authority();
+    if (authority != null) {
+      setIfAbsent(headers, "X-Forwarded-Host", authority.host());
+      if (authority.port() > 0) {
+        setIfAbsent(headers, "X-Forwarded-Port", String.valueOf(authority.port()));
       }
-      headers.set("X-Forwarded-Proto", inbound.scheme() == null ? "http" : inbound.scheme());
-      HostAndPort authority = inbound.authority();
-      if (authority != null) {
-        headers.set("X-Forwarded-Host", authority.host());
-        if (authority.port() > 0) {
-          headers.set("X-Forwarded-Port", String.valueOf(authority.port()));
-        }
-      }
+    }
+  }
+
+  /** Header names are case-insensitive here, so an outer hop's casing cannot cause a duplicate. */
+  private static void setIfAbsent(MultiMap headers, String name, String value) {
+    if (!headers.contains(name)) {
+      headers.set(name, value);
     }
   }
 
@@ -226,22 +328,7 @@ final class EdgeHeaders implements ProxyInterceptor {
       }
     }
 
-    if (forwarded.enabled()) {
-      SocketAddress remote = inbound.remoteAddress();
-      if (remote != null && remote.hostAddress() != null) {
-        request.headers().set("X-Forwarded-For", remote.hostAddress());
-      }
-      request
-          .headers()
-          .set("X-Forwarded-Proto", inbound.scheme() == null ? "http" : inbound.scheme());
-      HostAndPort authority = inbound.authority();
-      if (authority != null) {
-        request.headers().set("X-Forwarded-Host", authority.host());
-        if (authority.port() > 0) {
-          request.headers().set("X-Forwarded-Port", String.valueOf(authority.port()));
-        }
-      }
-    }
+    describeOriginalClient(request.headers(), inbound);
     return context.sendRequest();
   }
 }

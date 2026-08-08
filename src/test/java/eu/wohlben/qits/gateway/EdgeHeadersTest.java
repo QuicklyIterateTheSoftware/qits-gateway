@@ -1,6 +1,8 @@
 package eu.wohlben.qits.gateway;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -85,5 +87,46 @@ class EdgeHeadersTest {
     // upstream authenticates by cookie or bearer, so neither belongs on a handshake.
     assertFalse(EdgeHeaders.UPGRADE_HEADERS.contains("cookie"));
     assertFalse(EdgeHeaders.UPGRADE_HEADERS.contains("authorization"));
+  }
+
+  @Test
+  void theGatewayIsTheOnlyHopWhenNothingFrontsIt() {
+    // The direct deployment, unchanged by the edge landing in front of the platform: no inbound
+    // chain, so the peer IS the chain and the header reads exactly as it always did.
+    assertEquals("127.0.0.1", EdgeHeaders.forwardedFor(null, "127.0.0.1"));
+    assertEquals("127.0.0.1", EdgeHeaders.forwardedFor("", "127.0.0.1"));
+    assertEquals("127.0.0.1", EdgeHeaders.forwardedFor("   ", "127.0.0.1"));
+  }
+
+  @Test
+  void anOuterHopsClientIsKeptAndTheGatewaysPeerAddedAfterIt() {
+    // THE BUG THIS REPLACED. The gateway used to SET this header, so behind qits-platform-edge
+    // every request upstream claimed to come from the edge container and the real client address
+    // was gone by the time anything could log it.
+    assertEquals("203.0.113.7, 172.18.0.4", EdgeHeaders.forwardedFor("203.0.113.7", "172.18.0.4"));
+  }
+
+  @Test
+  void theClientStaysFirstHoweverManyProxiesSign() {
+    // Oldest first, so the ORIGINAL client is entry one and every later entry is a proxy. Anything
+    // that ever reads a client address out of this header must read the first entry, not the last.
+    String chain = EdgeHeaders.forwardedFor("203.0.113.7, 198.51.100.4", "172.18.0.4");
+
+    assertEquals("203.0.113.7, 198.51.100.4, 172.18.0.4", chain);
+    assertEquals("203.0.113.7", chain.split(",")[0].trim());
+  }
+
+  @Test
+  void anUnknownPeerLeavesTheChainAsItArrived() {
+    // A connection with no remote address must not truncate what an outer hop recorded.
+    assertEquals("203.0.113.7", EdgeHeaders.forwardedFor("203.0.113.7", null));
+    assertEquals("203.0.113.7", EdgeHeaders.forwardedFor("  203.0.113.7  ", "  "));
+  }
+
+  @Test
+  void nothingToSayMeansNoHeaderAtAll() {
+    // Null is the signal to leave the header off — an empty X-Forwarded-For would be a claim.
+    assertNull(EdgeHeaders.forwardedFor(null, null));
+    assertNull(EdgeHeaders.forwardedFor("", ""));
   }
 }
