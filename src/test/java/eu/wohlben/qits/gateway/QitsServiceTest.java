@@ -30,10 +30,12 @@ class QitsServiceTest {
     assertEquals("/platform-deployments", QitsService.PLATFORM_DEPLOYMENTS.pathPrefix());
     assertTrue(QitsService.forSegment("platform_deployments").isEmpty());
 
-    // The second multi-word service, which is what makes the rule above a derivation rather than
-    // one constant's special case.
-    assertEquals("platform-docs", QitsService.PLATFORM_DOCS.segment());
-    assertEquals("/platform-docs", QitsService.PLATFORM_DOCS.pathPrefix());
+    // PLATFORM_DEPLOYMENTS is the only multi-word service left — DOCS was the second until the
+    // byte-plane split made it an environment service at /docs. What keeps the rule a derivation
+    // rather than one constant's special case is noSegmentCarriesAnUnderscore below, which asserts
+    // it across the whole enum.
+    assertEquals("docs", QitsService.DOCS.segment());
+    assertEquals("/docs", QitsService.DOCS.pathPrefix());
   }
 
   @Test
@@ -115,7 +117,7 @@ class QitsServiceTest {
             QitsService.WORKSPACES, "Workspaces",
             QitsService.EVENTS, "Events",
             QitsService.OBSERVABILITY, "Observability",
-            QitsService.PLATFORM_DOCS, "Docs");
+            QitsService.DOCS, "Docs");
 
     for (QitsService service : QitsService.values()) {
       assertEquals(

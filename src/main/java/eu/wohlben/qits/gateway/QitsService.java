@@ -31,10 +31,10 @@ import java.util.stream.Stream;
  * <p><b>Why display identity lives here too.</b> {@code @qits/ui-components} used to hardcode the
  * navigation as a compile-time list of eight {@code {label, href}} entries in a published npm
  * package: a second declaration of what the platform routes, in a place that could not know, and it
- * lagged — {@code /platform-docs/} was routed for a while with no way to reach it. The gateway is
- * the one process that knows what it routes, so it answers the navigation ({@link
- * NavigationRoute}), and the identity a link needs belongs on the constant that already carries the
- * routing identity. A service is added in one place, still.
+ * lagged — {@code /docs/} was routed for a while with no way to reach it. The gateway is the one
+ * process that knows what it routes, so it answers the navigation ({@link NavigationRoute}), and
+ * the identity a link needs belongs on the constant that already carries the routing identity. A
+ * service is added in one place, still.
  *
  * <p>Which services are actually <i>routed</i> is a deployment decision: a service becomes live
  * only when a {@code qits.gateway.proxy-hosts.<segment>} entry names its host (see {@link
@@ -70,14 +70,14 @@ public enum QitsService {
   /** qits-platform-deployments — environment topology plus deployment execution, in one service. */
   PLATFORM_DEPLOYMENTS("Deployments", 2),
   /**
-   * qits-platform-docs — the reading surface over the documentation sites qits-artifacts holds.
+   * qits-docs — the reading surface over the documentation sites qits-artifacts holds.
    *
    * <p>It stores nothing: it resolves a site's newest version and streams bytes from {@code
    * /artifacts/docs}, so the two are one deployment decision rather than two stores to keep in
    * step. Which means this entry routes a <em>view</em>, and a deployment that runs it without
    * qits-artifacts has published no documentation to look at.
    */
-  PLATFORM_DOCS("Docs", 8);
+  DOCS("Docs", 8);
 
   /**
    * The {@link #navigationPosition()} of a service that is not in the navigation. Never compared

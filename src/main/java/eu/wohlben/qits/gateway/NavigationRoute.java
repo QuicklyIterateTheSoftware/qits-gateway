@@ -19,9 +19,8 @@ import java.util.Optional;
  * <p>It used to be a compile-time list of eight {@code {label, href}} entries inside
  * {@code @qits/ui-components}, i.e. a second source of truth for what the platform serves,
  * published as an npm package and updated by a release of that package. It lagged exactly the way a
- * copy does: {@code /platform-docs/} was routed for a while with no entry pointing at it. The
- * gateway holds the route table, so the navigation is derived from the route table and the copy is
- * gone.
+ * copy does: {@code /docs/} was routed for a while with no entry pointing at it. The gateway holds
+ * the route table, so the navigation is derived from the route table and the copy is gone.
  *
  * <p><b>A raw Vert.x route, not JAX-RS</b>, for the same reason as {@link ConfigJsonRoute} and
  * {@code AuthMeRoute}: this repo has no REST layer by design, and one JSON document is not worth
@@ -43,7 +42,7 @@ import java.util.Optional;
  * From {@link RouteTable#routes()}, not from {@link QitsService#values()}, and that is the whole
  * point of moving it here: only what is <em>actually proxied</em> appears. A service the deployment
  * did not configure has no route, so it gets no link — and the docs SPA got its entry precisely
- * when {@code platform-docs} was routed, with nothing to release and nobody to remind. The rules:
+ * when {@code docs} was routed, with nothing to release and nobody to remind. The rules:
  *
  * <ul>
  *   <li><b>Home is prepended unconditionally.</b> The landing SPA is this process' own static

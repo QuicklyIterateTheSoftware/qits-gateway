@@ -44,7 +44,7 @@ class NavigationLinksTest {
 
   @Test
   void homeIsPrependedAndComesFirst() {
-    List<Link> links = NavigationRoute.links(routesFor(QitsService.PLATFORM_DOCS, QitsService.CI));
+    List<Link> links = NavigationRoute.links(routesFor(QitsService.DOCS, QitsService.CI));
 
     assertEquals(new Link("Home", "/"), links.getFirst());
     assertEquals(List.of("Home", "CI", "Docs"), labels(links));
@@ -94,7 +94,7 @@ class NavigationLinksTest {
     List<Link> links =
         NavigationRoute.links(
             routesFor(
-                QitsService.PLATFORM_DOCS,
+                QitsService.DOCS,
                 QitsService.OBSERVABILITY,
                 QitsService.EVENTS,
                 QitsService.WORKSPACES,
@@ -124,9 +124,9 @@ class NavigationLinksTest {
     // "/" and is already one.
     List<Link> links =
         NavigationRoute.links(
-            routesFor(QitsService.CI, QitsService.PLATFORM_DEPLOYMENTS, QitsService.PLATFORM_DOCS));
+            routesFor(QitsService.CI, QitsService.PLATFORM_DEPLOYMENTS, QitsService.DOCS));
 
-    assertEquals(List.of("/", "/ci/", "/platform-deployments/", "/platform-docs/"), hrefs(links));
+    assertEquals(List.of("/", "/ci/", "/platform-deployments/", "/docs/"), hrefs(links));
     for (Link link : links) {
       assertTrue(link.href().startsWith("/"), link + " must be root-relative");
       assertTrue(link.href().endsWith("/"), link + " must end in a slash");

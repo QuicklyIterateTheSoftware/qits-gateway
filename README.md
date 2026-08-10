@@ -253,7 +253,7 @@ is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim
 | `qits-events` | `events` | `/events/*` | Events (6) |
 | `qits-ci` | `ci` | `/ci/*` | CI (1) |
 | `qits-platform-deployments` | `platform-deployments` | `/platform-deployments/*` | Deployments (2) |
-| `qits-platform-docs` | `platform-docs` | `/platform-docs/*` | Docs (8) |
+| `qits-docs` | `docs` | `/docs/*` | Docs (8) |
 
 ᵃ `/v2/*` is the OCI registry root, claimed by the artifacts entry rather than by a key of its own —
 see "The routing model". It is the only prefix in the system that is not a service segment.
@@ -265,7 +265,7 @@ see "The routing model". It is the only prefix in the system that is not a servi
 replaced the retired `qits-cd`, whose `cd` segment is gone from the registry — a `proxy-hosts.cd`
 entry is now an "unknown qits service" startup error.
 
-`qits-platform-docs` serves the documentation sites qits-artifacts holds and stores nothing of its
+`qits-docs` serves the documentation sites qits-artifacts holds and stores nothing of its
 own — it resolves a site's newest version and streams the bytes through. So it is a *view*, and
 routing it on a deployment without qits-artifacts gives you a reader for documentation nobody has
 published.
@@ -532,7 +532,7 @@ The platform's left navigation, as JSON, answered `GET` and `HEAD`:
 **It is derived from the route table, not from the `QitsService` enum**, and that is the entire
 reason it lives here. `@qits/ui-components` used to hardcode the same list at compile time and ship
 it as an npm package: a second declaration of what the platform serves, held by something that
-cannot know, updated by a release. It lagged exactly the way a copy does — `/platform-docs/` was
+cannot know, updated by a release. It lagged exactly the way a copy does — `/docs/` was
 routed for a while with no entry pointing at it. The gateway is the one process that knows what it
 routes, so a service appears in the menu **precisely when it is proxied**, with nothing to release.
 
@@ -560,7 +560,7 @@ A gateway routing the whole registry above answers, in this order:
           {"label":"Deployments","href":"/platform-deployments/"},
           {"label":"Artifacts","href":"/artifacts/"},{"label":"Projects","href":"/projects/"},
           {"label":"Workspaces","href":"/workspaces/"},{"label":"Events","href":"/events/"},
-          {"label":"Observability","href":"/observability/"},{"label":"Docs","href":"/platform-docs/"}]}
+          {"label":"Observability","href":"/observability/"},{"label":"Docs","href":"/docs/"}]}
 ```
 
 An **object** with a `links` array, not a bare array, so this document can grow a second field
