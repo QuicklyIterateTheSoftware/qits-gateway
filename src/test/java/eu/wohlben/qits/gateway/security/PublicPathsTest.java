@@ -136,19 +136,21 @@ class PublicPathsTest {
     }
 
     @Test
-    void onlyTheCiEventIntakeIsPublic() {
-      // The intake is token-free at the session-policy layer (the git host's post-receive hook
-      // holds no session, and after extraction is another process) and guarded by the static-token
-      // filter in the service.
-      assertTrue(PublicPaths.isPublic("GET", "/ci/api/events/post-receive"));
-      // Run READS are not public: step output is the build log of a possibly private repository,
+    void nothingOfCiIsPublic() {
+      // /ci/api/events/ WAS public, for exactly one caller: the git host's post-receive hook, which
+      // holds no session and could not have been given one. That caller is gone — a push is a
+      // durable domain event on the platform bus now and qits-ci consumes it as a subscriber — so
+      // the exemption goes with it. What is still served under that path is the MANUAL trigger,
+      // which a person invokes and a person has a session for; leaving the entry would have left an
+      // open intake behind a comment naming a hook that no longer calls.
+      assertFalse(PublicPaths.isPublic("POST", "/ci/api/events/post-receive"));
+      assertFalse(PublicPaths.isPublic("POST", "/ci/api/events/trigger"));
+      // Run READS were never public: step output is the build log of a possibly private repository,
       // and repo ids are handed to containers/clone urls, so anonymous reads would leak them.
       assertFalse(PublicPaths.isPublic("GET", "/ci/api/runs"));
       assertFalse(PublicPaths.isPublic("GET", "/ci/api/runs/run-1"));
       assertFalse(PublicPaths.isPublic("GET", "/ci/api"));
-      assertFalse(
-          PublicPaths.isPublic("GET", "/ci/api/events")); // only the subtree, not the bare path
-      assertFalse(PublicPaths.isPublic("GET", "/cinema/api/events/x")); // prefix must not bleed
+      assertFalse(PublicPaths.isPublic("GET", "/ci/api/events"));
     }
 
     @Test
@@ -250,7 +252,9 @@ class PublicPathsTest {
       assertTrue(PublicPaths.isPublic("GET", "/projects/mcp"));
       assertTrue(PublicPaths.isPublic("GET", "/workspaces/daemon/w1"));
       assertTrue(PublicPaths.isPublic("GET", "/workspaces/api/capture"));
-      assertTrue(PublicPaths.isPublic("GET", "/ci/api/events/post-receive"));
+      // qits-ci's is deliberately absent: the segment-prefixed spelling was public too and is not
+      // any more, because its one token-free caller became a bus subscription. See
+      // nothingOfCiIsPublic.
     }
   }
 

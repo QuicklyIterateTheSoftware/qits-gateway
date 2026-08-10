@@ -414,9 +414,12 @@ expires:
 - the gateway's own surface (`/q/*`, `/api/auth/*`, `/api/config.json`, `/main-navigation`) —
   permanent;
 - the segment-prefixed forms a split-out service serves (`/artifacts/git/*`,
-  `/observability/api/otel/*`, `/ci/api/events/*`, `/workspaces/daemon/*`, `/projects/mcp`, …) —
+  `/observability/api/otel/*`, `/workspaces/daemon/*`, `/projects/mcp`, …) —
   permanent, and identical to the address the service serves on `qits-net` because forwarding is
-  verbatim;
+  verbatim. **An entry here lives exactly as long as its token-free caller does**: `/ci/api/events/*`
+  was on this list for the git host's post-receive hook, and left it when a push became a durable
+  domain event qits-ci subscribes to. An allowlist entry that outlives its caller is an open intake
+  nobody is watching;
 - **`/v2/*`** — the OCI registry, and doubly exceptional: not segment-prefixed (the client
   hardcodes the root), and the one entry that is public for **read methods only** (`GET`/`HEAD`).
   Pulls are anonymous by design: image names are meant to be *shared*, and are guessable on

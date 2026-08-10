@@ -115,20 +115,25 @@ public final class PublicPaths {
         // filter in the service), and reads have to work as a plain <img> src.
         || path.equals("/artifacts/api")
         || path.startsWith("/artifacts/api/")
-        // ci pipelines: ONLY the git host's event intake is token-free (its caller is the
-        // post-receive hook, which holds no session, and after extraction is another process); it
-        // is guarded by the static qits.ci.token. Run reads are NOT public — step output is build
-        // logs of a possibly private repository, so /ci/api/runs/… stays behind the policy.
-        || path.startsWith("/ci/api/events/")
+        // NOTHING of qits-ci is here any more, and the entry that used to be is worth recording
+        // rather than deleting silently. It was /ci/api/events/ — the git host's post-receive hook
+        // POSTing an accepted push, a caller that holds no session and could not have been given
+        // one. The git host does not call it: a push now becomes a durable domain event on the
+        // platform bus (SCMPublishCommit and its three siblings) which qits-ci consumes as a
+        // subscriber, so the one token-free caller this exemption existed for no longer exists.
+        // What is left behind that path is the manual trigger, which a person invokes and a person
+        // has a session for. An allowlist entry outliving its caller is an open intake nobody is
+        // watching, so it goes with the caller.
+        //
         // NOTHING of qits-platform-deployments is here. Its one machine intake
         // (/platform-deployments/api/events/build-succeeded) is called by qits-ci directly on the
         // internal network and never traverses the gateway, so no caller asks for a session-free
         // front-door spelling — and without one there is no token scheme to carry either: the
         // whole of /platform-deployments/* stays behind the session policy, and intra-network
         // callers are trusted. The reads are a browser's, which has a session. If a deployment ever
-        // points qits-ci's qits.platform.deployments.intake-url through the gateway, an allowlist
-        // entry plus a write guard in the service come back TOGETHER (the /ci/api/events/ shape
-        // above); one without the other is either a dead token or an open intake.
+        // points a machine intake through the gateway, an allowlist entry plus a write guard in the
+        // service come back TOGETHER; one without the other is either a dead token or an open
+        // intake.
         // OTLP ingest from workspace containers and fixture SPAs. The exporters append
         // /v1/<signal> to a literal endpoint, so the subtree is the unit.
         || path.startsWith("/observability/api/otel/")
