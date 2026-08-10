@@ -19,11 +19,16 @@ package eu.wohlben.qits.gateway.security;
  *       /<segment>/…} prefix. The one exception is a protocol root a client hardcodes; see there.
  * </ul>
  *
- * <p>There was a third, {@code onTheMonolith}: the monolith-relative spellings ({@code /git/},
- * {@code /api/otel/}, {@code /mcp/}) that the {@code /} catch-all carried. It is gone with the
- * catch-all itself. qits is deployed clean — these services and nothing else, no monolith beside
- * them and no shared access — so those paths name an upstream that does not exist, and the gateway
- * now 404s them rather than allowing them through to nothing.
+ * <p>There was a third, {@code onTheMonolith}: the monolith-relative spellings ({@code /api/otel/},
+ * {@code /mcp/}) that the {@code /} catch-all carried. It is gone with the catch-all itself. qits
+ * is deployed clean — these services and nothing else, no monolith beside them and no shared access
+ * — so those paths name an upstream that does not exist, and the gateway now 404s them rather than
+ * allowing them through to nothing.
+ *
+ * <p>{@code /git/} was in that group and is the one spelling that came back, which is worth being
+ * precise about: it is not the monolith's path returning, it is qits-githost's own segment. The git
+ * host left qits-artifacts in the byte-plane split, so {@code /artifacts/git/} is the spelling that
+ * died and {@code /git/} has a real route with a real upstream behind it.
  *
  * <p>The grouping survives because it still says something: a path is public either because this
  * process serves it to a caller with no session yet, or because a service serves it to a caller
@@ -108,8 +113,24 @@ public final class PublicPaths {
    */
   private static boolean onAService(String path) {
     return
-    // qits-artifacts is the git host: container clone/push, and qits-ci's own fetches.
-    path.startsWith("/artifacts/git/")
+    // qits-githost: container clone/push, and qits-ci's own fetches. One subtree covers both,
+    // because both are addressed under a repository — the smart-HTTP endpoints
+    // (/git/<repoId>/info/refs, /git-upload-pack, /git-receive-pack) and the content reads qits-ci
+    // makes instead of cloning (/git/<repoId>/blob/<rev>/<path>, /git/<repoId>/tree/<rev>).
+    //
+    // It was /artifacts/git/ until the byte-plane split moved the git host out of qits-artifacts,
+    // and the scope is deliberately unchanged: the SAME subtree, neither widened nor narrowed. Note
+    // what stays behind the policy, exactly as it did before: the BARE /git — qits-githost's
+    // repository listing, read by qits-ci on qits-net and asked for by no token-free caller here —
+    // and /git/q, whose health and OpenAPI are a service's, covered by the
+    // gatewaysOwn note above.
+    //
+    // Session-free is not auth-free. The git host's own checks are the real ones and are unchanged
+    // by this line: the push token (-o qits.token=…, ProtectedRefHook) and the machine claims on a
+    // bearer. What this says is only that a caller with no BROWSER SESSION may reach them — which
+    // is
+    // every caller git has, since a clone cannot answer an oauth challenge.
+    path.startsWith("/git/")
         // qits-artifacts' blob store is the whole of that service's JSON API. Token-free at the
         // session layer: CI uploaders hold no session (writes are guarded by the static-token
         // filter in the service), and reads have to work as a plain <img> src.

@@ -77,7 +77,25 @@ public enum QitsService {
    * step. Which means this entry routes a <em>view</em>, and a deployment that runs it without
    * qits-artifacts has published no documentation to look at.
    */
-  DOCS("Docs", 8);
+  DOCS("Docs", 8),
+  /**
+   * qits-githost — the git smart-HTTP host, and <b>deliberately unlabelled</b>: git is a protocol,
+   * not a page. A navigation entry would link a browser at a transport.
+   *
+   * <p><b>The one service whose segment is not its name with {@code qits-} dropped.</b> Everywhere
+   * else that derivation is the rule; here it would give {@code /githost}, and the address is
+   * {@code /git} — {@code GitHostRoutes.BASE} in that repository, with its non-application root at
+   * {@code /git/q}. Routing is verbatim, so the segment has to be what the service serves, and what
+   * it serves is what its clients already hardcode: every clone url a person copies, every
+   * workspace container's remote, and qits-ci's config reads at {@code
+   * <host>/git/<repoId>/blob/<rev>/<path>}. The constant is named for the segment rather than the
+   * repository so that {@link #segment()} stays a derivation with no per-constant override — which
+   * is the same reason {@code PLATFORM_DEPLOYMENTS} is not called {@code DEPLOYMENTS}.
+   *
+   * <p>It moved here from qits-artifacts, which served the same routes under {@code /artifacts/git}
+   * until the byte-plane split: a repository is not an artifact, it only shared the storage layout.
+   */
+  GIT;
 
   /**
    * The {@link #navigationPosition()} of a service that is not in the navigation. Never compared

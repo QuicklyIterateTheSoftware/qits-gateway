@@ -75,12 +75,25 @@ class PublicPathsTest {
   class OnAService {
 
     @Test
-    void theGitHostSubtreeIsPublicUnderTheArtifactsSegment() {
-      assertTrue(PublicPaths.isPublic("GET", "/artifacts/git/abc-123/info/refs"));
-      assertTrue(PublicPaths.isPublic("GET", "/artifacts/git/proj-1/repo/git-receive-pack"));
-      assertFalse(
-          PublicPaths.isPublic("GET", "/artifacts/git")); // only the subtree, not the bare path
-      assertFalse(PublicPaths.isPublic("GET", "/artifacts/gitignore")); // prefix must not bleed
+    void theGitHostSubtreeIsPublicUnderItsOwnSegment() {
+      // Smart-HTTP, both address schemes qits-githost serves.
+      assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
+      assertTrue(PublicPaths.isPublic("GET", "/git/proj-1/repo/git-receive-pack"));
+      // The content reads qits-ci makes instead of cloning — the same subtree, deliberately.
+      assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/blob/main/.config/qits/pipeline.yml"));
+      assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/tree/main"));
+
+      assertFalse(PublicPaths.isPublic("GET", "/git")); // only the subtree, not the bare listing
+      assertFalse(PublicPaths.isPublic("GET", "/gitignore")); // prefix must not bleed
+    }
+
+    @Test
+    void theGitHostsOldArtifactsSpellingIsGone() {
+      // The byte-plane split moved the git host out of qits-artifacts. The old subtree names an
+      // address nothing serves now, and an allowlist entry outliving its route is an exemption
+      // nobody is watching.
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/git/abc-123/info/refs"));
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/git/proj-1/repo/git-receive-pack"));
     }
 
     @Test
@@ -227,7 +240,9 @@ class PublicPathsTest {
 
     @Test
     void containerFacingPathsAreNoLongerPublic() {
-      assertFalse(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
+      // /git/** is NOT on this list any more, and it is the one spelling that came back rather than
+      // died: it is qits-githost's own segment now, not a monolith-relative form. See
+      // OnAService.theGitHostSubtreeIsPublicUnderItsOwnSegment.
       assertFalse(PublicPaths.isPublic("GET", "/mcp"));
       assertFalse(PublicPaths.isPublic("GET", "/mcp/repository"));
       assertFalse(PublicPaths.isPublic("GET", "/api/workspace-daemon/w1"));
@@ -245,7 +260,7 @@ class PublicPathsTest {
     /** The segment-prefixed forms are the live ones, and stay public. */
     @Test
     void theSegmentPrefixedFormsStillAre() {
-      assertTrue(PublicPaths.isPublic("GET", "/artifacts/git/abc-123/info/refs"));
+      assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
       assertTrue(PublicPaths.isPublic("GET", "/artifacts/api/repositories/ci-screenshots/blobs"));
       assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/traces"));
       assertTrue(PublicPaths.isPublic("GET", "/observability/mcp"));

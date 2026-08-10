@@ -254,12 +254,22 @@ is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim
 | `qits-ci` | `ci` | `/ci/*` | CI (1) |
 | `qits-platform-deployments` | `platform-deployments` | `/platform-deployments/*` | Deployments (2) |
 | `qits-docs` | `docs` | `/docs/*` | Docs (8) |
+| `qits-githost` | `git` ᵇ | `/git/*` | — |
 
 ᵃ `/v2/*` is the OCI registry root, claimed by the artifacts entry rather than by a key of its own —
 see "The routing model". It is the only prefix in the system that is not a service segment.
 
+ᵇ The one segment that is not its repository name with `qits-` dropped. qits-githost serves `/git`
+(`GitHostRoutes.BASE`, with its non-application root at `/git/q`), routing here is verbatim, and the
+address is one its clients hardcode — every clone url a person copies, every workspace container's
+remote, and qits-ci's config reads at `<host>/git/<repoId>/blob/<rev>/<path>`. So the segment is
+`git`, the enum constant is `GIT`, and the key is `qits.gateway.proxy-hosts.git`
+(`QITS_GATEWAY_PROXY_HOSTS_GIT`). It was `/artifacts/git/*` until the byte-plane split moved the git
+host out of qits-artifacts.
+
 ᶜ The label and place this service takes in [`/main-navigation`](#main-navigation) when it is routed;
-`—` means it is routable but never shown. `stt` is an API with no SPA behind it.
+`—` means it is routable but never shown. `stt` is an API with no SPA behind it; `git` is a
+protocol, and a menu entry would link a browser at a transport.
 
 `qits-platform-deployments` owns environment topology and deployment execution in one service. It
 replaced the retired `qits-cd`, whose `cd` segment is gone from the registry — a `proxy-hosts.cd`
@@ -413,7 +423,7 @@ expires:
 
 - the gateway's own surface (`/q/*`, `/api/auth/*`, `/api/config.json`, `/main-navigation`) —
   permanent;
-- the segment-prefixed forms a split-out service serves (`/artifacts/git/*`,
+- the segment-prefixed forms a split-out service serves (`/git/*`,
   `/observability/api/otel/*`, `/workspaces/daemon/*`, `/projects/mcp`, …) —
   permanent, and identical to the address the service serves on `qits-net` because forwarding is
   verbatim. **An entry here lives exactly as long as its token-free caller does**: `/ci/api/events/*`
@@ -431,11 +441,22 @@ expires:
   the point, because external push is unwanted entirely. Widening `/v2` back to all methods
   without restoring a guard in qits-artifacts opens push to the world; `PublicPathsTest` and
   `GatewayAuthTest` both hold that line;
-There used to be a third group: the monolith-relative forms (`/git/*`, `/api/otel/*`, `/mcp/*`, …),
-which were public because the `/` catch-all's upstream served them. They went with the catch-all.
-Those paths now name no upstream, so they are neither routed nor public — `PublicPathsTest` asserts
-they are *protected*, rather than simply dropping the cases, so a re-added catch-all fails a test
-instead of silently reopening an anonymous surface.
+There used to be a third group: the monolith-relative forms (`/api/otel/*`, `/mcp/*`, …), which were
+public because the `/` catch-all's upstream served them. They went with the catch-all. Those paths
+now name no upstream, so they are neither routed nor public — `PublicPathsTest` asserts they are
+*protected*, rather than simply dropping the cases, so a re-added catch-all fails a test instead of
+silently reopening an anonymous surface.
+
+`/git/*` was in that group and is the one spelling that came back, which is worth being precise
+about: it is not the monolith's path returning, it is qits-githost's own segment. The git host left
+qits-artifacts in the byte-plane split, so `/artifacts/git/*` is the spelling that died and
+`/git/*` is a real route with a real upstream behind it. The exemption's **scope** is unchanged —
+the same subtree, covering the smart-HTTP endpoints and the blob/tree content reads qits-ci makes
+instead of cloning, with the bare `/git` listing and `/git/q` still behind the session policy.
+Session-free is not auth-free: the git host's push token (`-o qits.token=…`) and its machine claims
+are the actual authorization, exactly as they were under the old prefix. What the entry says is only
+that a caller with no browser session may reach them, which is every caller git has — a clone cannot
+answer an oauth challenge.
 
 **The landing page is not public either, and that is the decision rather than an oversight.** `/` is
 not in `PublicPaths`, so an `oauth` gateway challenges an anonymous visitor *before* serving a byte

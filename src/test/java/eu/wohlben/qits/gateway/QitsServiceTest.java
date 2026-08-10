@@ -23,6 +23,21 @@ class QitsServiceTest {
   }
 
   @Test
+  void theGitHostIsReachedAtTheSegmentItServes() {
+    // The one service whose segment is not its repository name with qits- dropped: qits-githost
+    // serves /git (GitHostRoutes.BASE), and routing is verbatim, so the segment has to be that.
+    // The constant is named GIT for it, which is what keeps segment() free of a per-constant
+    // override — and this assertion is what says the mismatch with the repository name is a
+    // decision rather than a typo somebody should "correct" to githost.
+    assertEquals("git", QitsService.GIT.segment());
+    assertEquals("/git", QitsService.GIT.pathPrefix());
+
+    // Which is also the proxy-hosts key, since RouteTable composes it from the segment:
+    // qits.gateway.proxy-hosts.git, i.e. QITS_GATEWAY_PROXY_HOSTS_GIT.
+    assertEquals(Optional.of(QitsService.GIT), QitsService.forSegment("git"));
+  }
+
+  @Test
   void aMultiWordServiceIsDashedEverywhereItIsRead() {
     // The enum spells the name with an underscore because Java requires it; nothing else may.
     // name().toLowerCase() alone would put /platform_deployments in the URL, which is wrong.
@@ -133,6 +148,9 @@ class QitsServiceTest {
     // SPA behind it. The javadoc on the constant says so; this is what stops a well-meaning
     // "completion" of the list from being green.
     assertTrue(QitsService.STT.navigationLabel().isEmpty());
+    // Same decision, different reason: git is a protocol, not a page. A link would point a browser
+    // at a transport. No label is the whole mechanism — NavigationRoute drops what it cannot name.
+    assertTrue(QitsService.GIT.navigationLabel().isEmpty());
     assertEquals(QitsService.NOT_IN_NAVIGATION, QitsService.STT.navigationPosition());
   }
 
