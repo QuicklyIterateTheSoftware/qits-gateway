@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -23,18 +24,44 @@ class QitsServiceTest {
   }
 
   @Test
-  void theGitHostIsReachedAtTheSegmentItServes() {
-    // The one service whose segment is not its repository name with qits- dropped: qits-githost
-    // serves /git (GitHostRoutes.BASE), and routing is verbatim, so the segment has to be that.
-    // The constant is named GIT for it, which is what keeps segment() free of a per-constant
-    // override — and this assertion is what says the mismatch with the repository name is a
-    // decision rather than a typo somebody should "correct" to githost.
-    assertEquals("git", QitsService.GIT.segment());
-    assertEquals("/git", QitsService.GIT.pathPrefix());
+  void theGitHostTakesItsRepositoryNameAndKeepsTheProtocolAddress() {
+    // This constant used to be GIT, at /git, and was the one exception to the derivation rule. The
+    // SPA is what ended the exception: qits-githost serves a page, so it takes the segment its
+    // repository name gives it, like every sibling.
+    assertEquals("githost", QitsService.GITHOST.segment());
+    assertEquals("/githost", QitsService.GITHOST.pathPrefix());
 
     // Which is also the proxy-hosts key, since RouteTable composes it from the segment:
-    // qits.gateway.proxy-hosts.git, i.e. QITS_GATEWAY_PROXY_HOSTS_GIT.
-    assertEquals(Optional.of(QitsService.GIT), QitsService.forSegment("git"));
+    // qits.gateway.proxy-hosts.githost, i.e. QITS_GATEWAY_PROXY_HOSTS_GITHOST. The old spelling
+    // names no service any more, and a deployment still holding it fails startup rather than
+    // routing nothing quietly.
+    assertEquals(Optional.of(QitsService.GITHOST), QitsService.forSegment("githost"));
+    assertTrue(QitsService.forSegment("git").isEmpty());
+  }
+
+  @Test
+  void theGitProtocolStillArrivesAtTheGitHost() {
+    // /git is an extra prefix, for the reason extras exist: a clone url, a workspace remote and
+    // qits-ci's config reads all hardcode it, and git cannot be told a new address. The segment
+    // comes first — everything qits itself emits uses that form.
+    assertEquals(List.of("/githost", "/git"), QitsService.GITHOST.pathPrefixes());
+  }
+
+  @Test
+  void thePlatformMirrorIsNamedForItsSegment() {
+    // MIRROR rather than PLATFORM_MIRROR: the service already claims /mirror/q as its
+    // non-application root, so the segment has to be `mirror`, and a constant is named for the
+    // segment so segment() needs no per-constant override. Same rule PLATFORM_DEPLOYMENTS follows
+    // in the other direction.
+    assertEquals("mirror", QitsService.MIRROR.segment());
+    assertEquals("/mirror", QitsService.MIRROR.pathPrefix());
+    assertEquals(Optional.of(QitsService.MIRROR), QitsService.forSegment("mirror"));
+
+    // Its npm, maven and OCI wires are NOT extras here. They are qits-artifacts' addresses today
+    // (/artifacts/npm, /artifacts/maven, /v2), two services cannot hold one prefix behind one
+    // gateway, and moving the clients over is a separate work package.
+    assertEquals(List.of("/mirror"), QitsService.MIRROR.pathPrefixes());
+    assertEquals(Optional.of(QitsService.ARTIFACTS), QitsService.forSegment("artifacts"));
   }
 
   @Test
@@ -86,9 +113,10 @@ class QitsServiceTest {
   @Test
   void everyOtherServiceClaimsExactlyItsSegment() {
     // So an extra prefix added later without thought fails here rather than in production. An extra
-    // is a concession to a client we do not control, never a convenience alias.
+    // is a concession to a client we do not control, never a convenience alias. There are exactly
+    // two: docker's /v2 on artifacts, and git's /git on the git host.
     for (QitsService service : QitsService.values()) {
-      if (service == QitsService.ARTIFACTS) {
+      if (service == QitsService.ARTIFACTS || service == QitsService.GITHOST) {
         continue;
       }
       assertEquals(
@@ -132,7 +160,9 @@ class QitsServiceTest {
             QitsService.WORKSPACES, "Workspaces",
             QitsService.EVENTS, "Events",
             QitsService.OBSERVABILITY, "Observability",
-            QitsService.DOCS, "Docs");
+            QitsService.DOCS, "Docs",
+            QitsService.GITHOST, "Githost",
+            QitsService.MIRROR, "Mirror");
 
     for (QitsService service : QitsService.values()) {
       assertEquals(
@@ -148,10 +178,41 @@ class QitsServiceTest {
     // SPA behind it. The javadoc on the constant says so; this is what stops a well-meaning
     // "completion" of the list from being green.
     assertTrue(QitsService.STT.navigationLabel().isEmpty());
-    // Same decision, different reason: git is a protocol, not a page. A link would point a browser
-    // at a transport. No label is the whole mechanism — NavigationRoute drops what it cannot name.
-    assertTrue(QitsService.GIT.navigationLabel().isEmpty());
     assertEquals(QitsService.NOT_IN_NAVIGATION, QitsService.STT.navigationPosition());
+
+    // stt is the only one left. The git host used to be here for a second reason — git is a
+    // protocol, not a page — and it now serves a page at /githost, so it has somewhere to link to.
+    assertEquals(1, unlabelled(), "stt should be the only unlabelled service");
+  }
+
+  private static long unlabelled() {
+    return Arrays.stream(QitsService.values())
+        .filter(service -> service.navigationLabel().isEmpty())
+        .count();
+  }
+
+  @Test
+  void theNavigationPositionsAreTheOrderTheMenuIsRead() {
+    // The menu a user sees, pinned end to end. Position is explicit rather than declaration order
+    // precisely so this list can be reordered without touching the registry — which means the only
+    // place the intended order is written down is here.
+    assertEquals(
+        List.of(
+            "CI",
+            "Deployments",
+            "Artifacts",
+            "Projects",
+            "Workspaces",
+            "Events",
+            "Observability",
+            "Docs",
+            "Githost",
+            "Mirror"),
+        Arrays.stream(QitsService.values())
+            .filter(service -> service.navigationLabel().isPresent())
+            .sorted(java.util.Comparator.comparingInt(QitsService::navigationPosition))
+            .map(service -> service.navigationLabel().orElseThrow())
+            .toList());
   }
 
   @Test

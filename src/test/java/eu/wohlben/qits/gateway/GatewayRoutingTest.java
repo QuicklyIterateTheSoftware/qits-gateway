@@ -36,9 +36,29 @@ class GatewayRoutingTest {
 
   @Test
   void theRegistryRootReachesArtifactsVerbatim() {
-    // /v2 is the first prefix in the system that is not /<segment>, so nothing else in this suite
+    // /v2 was the first prefix in the system that is not /<segment>, so nothing else in this suite
     // proves the gateway forwards it at all — let alone unrewritten.
     given().when().get("/v2/").then().statusCode(200).body(containsString("path=/v2/"));
+  }
+
+  @Test
+  void bothOfTheGitHostsAddressesReachTheOneUpstream() {
+    // One proxy-hosts entry, two prefixes: the SPA and API a browser opens at /githost, and the
+    // /git address every clone url, workspace remote and qits-ci config read hardcodes. A rename
+    // that dropped the extra would leave every clone in the platform 404ing on a landing page.
+    given()
+        .when()
+        .get("/githost/api/repositories")
+        .then()
+        .statusCode(200)
+        .body(containsString("path=/githost/api/repositories"));
+
+    given()
+        .when()
+        .get("/git/abc-123/info/refs?service=git-upload-pack")
+        .then()
+        .statusCode(200)
+        .body(containsString("path=/git/abc-123/info/refs?service=git-upload-pack"));
   }
 
   @Test

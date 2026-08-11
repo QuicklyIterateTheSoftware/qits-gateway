@@ -17,9 +17,10 @@ import java.util.Map;
  * assertion worth making about them.
  *
  * <p>A JDK {@code HttpServer} on an ephemeral port, so the test needs no docker, no fixture and no
- * fixed port. Two real {@link QitsService} segments ({@code artifacts}, {@code observability}) are
- * pointed at the stub via {@code qits.gateway.proxy-hosts.*}; the config is handed to Quarkus at
- * start, which is the only way the port (known only after binding) can reach the route table.
+ * fixed port. Three real {@link QitsService} segments ({@code artifacts}, {@code observability},
+ * {@code githost}) are pointed at the stub via {@code qits.gateway.proxy-hosts.*}; the config is
+ * handed to Quarkus at start, which is the only way the port (known only after binding) can reach
+ * the route table.
  *
  * <p>A <em>second</em> upstream, on Vert.x, sits behind the {@code projects} segment and does the
  * same job for WebSocket upgrades: it accepts the handshake and sends back the headers it saw as
@@ -126,10 +127,12 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
 
     int port = server.getAddress().getPort();
     Map<String, String> config = new HashMap<>();
-    // Two real services pointed at the stub — exercising host:port parsing and that distinct
-    // segments each resolve to their own route.
+    // Real services pointed at the stub — exercising host:port parsing and that distinct segments
+    // each resolve to their own route. githost is here for its EXTRA prefix: one entry has to put
+    // both /githost/* and the /git/* address git clients hardcode in front of this one upstream.
     config.put("qits.gateway.proxy-hosts.artifacts", "127.0.0.1:" + port);
     config.put("qits.gateway.proxy-hosts.observability", "127.0.0.1:" + port);
+    config.put("qits.gateway.proxy-hosts.githost", "127.0.0.1:" + port);
     config.put("qits.gateway.proxy-hosts.projects", "127.0.0.1:" + startSocketUpstream());
     return config;
   }

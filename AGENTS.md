@@ -82,8 +82,8 @@ build.
 src/main/java/eu/wohlben/qits/gateway/
   QitsService.java            the registry: enum of proxyable services; segment derivation (the
                               upstream host is the deployment's to name, never derived here),
-                              plus the extra root-level prefixes a service may claim (/v2), plus
-                              the DISPLAY identity (navigation label + position; no label ⇒ no
+                              plus the extra root-level prefixes a service may claim (/v2, /git),
+                              plus the DISPLAY identity (navigation label + position; no label ⇒ no
                               menu entry). The ONLY place a service is declared — route order, not
                               a config list, is what makes a proxied segment beat the landing SPA
   GatewayConfig.java          @ConfigMapping — the entire configuration surface
@@ -121,7 +121,9 @@ by inventing a config key.
 
 A service may also claim **extra, root-level prefixes** (`QitsService.pathPrefixes()`), which is how
 qits-artifacts gets `/v2` — the OCI registry root that docker and podman hardcode and that has no
-segment-prefixed spelling. One `proxy-hosts` entry then produces several routes. Two consequences a
+segment-prefixed spelling — and how qits-githost keeps `/git` beside its own `/githost` segment,
+because a clone url, a workspace remote and a qits-ci config read all spell the address themselves.
+One `proxy-hosts` entry then produces several routes. Two consequences a
 change here must respect: `GatewayRoute.name()` is **no longer unique**, so `GatewayRouter` keys its
 proxy map on the record rather than the name, and `RouteTable`'s comparator tie-breaks on `prefix()`
 rather than `name()` so the ordering stays total. An extra prefix is a concession to a client whose

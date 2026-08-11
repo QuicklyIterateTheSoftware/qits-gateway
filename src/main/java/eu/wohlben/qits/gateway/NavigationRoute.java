@@ -48,9 +48,11 @@ import java.util.Optional;
  *   <li><b>Home is prepended unconditionally.</b> The landing SPA is this process' own static
  *       output served by Quinoa — not a {@link QitsService}, in no route table, and never absent,
  *       because it is compiled into the binary.
- *   <li><b>One link per service, not per route.</b> qits-artifacts produces two routes ({@code
- *       /artifacts} and the extra {@code /v2}), and {@code /v2} must never appear: it is the
- *       address docker hardcodes for the OCI Distribution API, not a page a human can open.
+ *   <li><b>One link per service, not per route.</b> Two services claim an extra prefix — {@code
+ *       /v2} on qits-artifacts, {@code /git} on qits-githost — so each produces two routes and one
+ *       link. Neither extra may appear: both are addresses a protocol client hardcodes (docker's
+ *       OCI Distribution root, git's smart-HTTP root), and neither is a page a human can open. The
+ *       links point at the segments, {@code /artifacts/} and {@code /githost/}.
  *   <li><b>No label, no link</b> — see {@link QitsService#navigationLabel()}.
  *   <li><b>Order is the enum's</b> {@link QitsService#navigationPosition()}, never the route
  *       table's: that one is sorted longest-prefix-first, which is a matching concern and would put
@@ -126,10 +128,10 @@ public class NavigationRoute {
    *
    * <p>A route is mapped back to its service through {@link GatewayRoute#name()}, which <em>is</em>
    * the service segment ({@link GatewayRoute#forService}), so {@link QitsService#forSegment}
-   * resolves it exactly. Nothing here parses a prefix: {@code /v2} would resolve to no service if
-   * it were tried, and both of artifacts' routes carry the name {@code artifacts} — which is also
-   * what makes the dedupe a plain {@code distinct()} over services rather than a rule about {@code
-   * /v2}.
+   * resolves it exactly. Nothing here parses a prefix: {@code /v2} and {@code /git} would resolve
+   * to no service if they were tried, and both of a service's routes carry its segment as their
+   * name — which is what makes the dedupe a plain {@code distinct()} over services rather than a
+   * rule about a particular extra.
    */
   static List<Link> links(List<GatewayRoute> routes) {
     List<Link> links = new ArrayList<>();

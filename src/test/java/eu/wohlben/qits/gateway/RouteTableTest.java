@@ -227,6 +227,44 @@ class RouteTableTest {
   }
 
   @Test
+  void theGitHostEntryRoutesItsPageAndTheGitProtocol() {
+    // One key, two prefixes, one upstream — the same mechanism /v2 rides. `githost` is the key
+    // now: the segment moved when the service grew a SPA, and the old `git` key is an
+    // unknown-service startup error, which is what a deployment that missed the rename gets
+    // instead of a gateway that silently routes nothing.
+    List<GatewayRoute> routes = RouteTable.buildRoutes(Map.of("githost", "qits-githost"));
+    assertEquals(2, routes.size());
+    assertTrue(routes.stream().allMatch(r -> r.name().equals("githost")));
+
+    RouteTable table = RouteTable.of(routes);
+    assertEquals("githost", matched(table, "/githost"));
+    assertEquals("githost", matched(table, "/githost/api/repositories"));
+    assertEquals("githost", matched(table, "/githost/q/health/ready"));
+    // The addresses a clone and qits-ci hardcode reach the same service.
+    assertEquals("githost", matched(table, "/git/abc-123/info/refs"));
+    assertEquals("githost", matched(table, "/git/abc-123/blob/main/.config/qits/pipeline.yml"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> RouteTable.buildRoutes(Map.of("git", "qits-githost")));
+  }
+
+  @Test
+  void theMirrorIsAnOrdinarySegmentWithNoProtocolPrefixes() {
+    // qits-platform-mirror serves npm, maven and OCI on qits-artifacts' literals today, so it
+    // claims NO extra prefix here: routing them would take them from artifacts. One route, one
+    // segment, until the client-config cutover is its own work package.
+    List<GatewayRoute> routes = RouteTable.buildRoutes(Map.of("mirror", "qits-platform-mirror"));
+    assertEquals(1, routes.size());
+
+    RouteTable table = RouteTable.of(routes);
+    assertEquals("mirror", matched(table, "/mirror"));
+    assertEquals("mirror", matched(table, "/mirror/q/health/ready"));
+    assertEquals(null, matched(table, "/v2/qits/alpine/manifests/latest"));
+    assertEquals(null, matched(table, "/artifacts/npm/npmjs/zone.js"));
+  }
+
+  @Test
   void theRegistryRootIsSegmentAwareLikeEveryOtherPrefix() {
     RouteTable table = RouteTable.of(RouteTable.buildRoutes(Map.of("artifacts", "qits-artifacts")));
     assertEquals(null, matched(table, "/v2x"));

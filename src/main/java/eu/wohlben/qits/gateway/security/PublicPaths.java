@@ -26,7 +26,8 @@ package eu.wohlben.qits.gateway.security;
  * allowing them through to nothing.
  *
  * <p>{@code /git/} was in that group and is the one spelling that came back, which is worth being
- * precise about: it is not the monolith's path returning, it is qits-githost's own segment. The git
+ * precise about: it is not the monolith's path returning, it is the address git clients hardcode,
+ * routed to qits-githost as an extra prefix beside that service's {@code /githost} segment. The git
  * host left qits-artifacts in the byte-plane split, so {@code /artifacts/git/} is the spelling that
  * died and {@code /git/} has a real route with a real upstream behind it.
  *
@@ -119,11 +120,14 @@ public final class PublicPaths {
     // makes instead of cloning (/git/<repoId>/blob/<rev>/<path>, /git/<repoId>/tree/<rev>).
     //
     // It was /artifacts/git/ until the byte-plane split moved the git host out of qits-artifacts,
-    // and the scope is deliberately unchanged: the SAME subtree, neither widened nor narrowed. Note
-    // what stays behind the policy, exactly as it did before: the BARE /git — qits-githost's
-    // repository listing, read by qits-ci on qits-net and asked for by no token-free caller here —
-    // and /git/q, whose health and OpenAPI are a service's, covered by the
-    // gatewaysOwn note above.
+    // and the scope is deliberately unchanged: the SAME subtree, neither widened nor narrowed.
+    //
+    // It is also unchanged by the service gaining a segment of its own. /git is the address git
+    // clients hardcode and rides qits-githost's entry as an extra prefix, so this line still names
+    // exactly the protocol surface. What stays behind the policy: the BARE /git — the repository
+    // listing, read by qits-ci on qits-net and asked for by no token-free caller here — the whole
+    // of /githost/*, which is a SPA and its API, read by a browser that has a session, and
+    // /githost/q, whose health and OpenAPI are a service's, covered by the gatewaysOwn note above.
     //
     // Session-free is not auth-free. The git host's own checks are the real ones and are unchanged
     // by this line: the push token (-o qits.token=…, ProtectedRefHook) and the machine claims on a
