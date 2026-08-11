@@ -101,10 +101,44 @@ steps:
       npm run build
       cd -
 
+      # BUILDKIT, ENGAGED EXPLICITLY, and the plugin has to be installed before it can be. Measured
+      # in THIS image — node-docker-base is node:24-alpine plus `apk add docker-cli`, CLI 29.5.3 —
+      # against this host's daemon:
+      #
+      #   docker build       "DEPRECATED: The legacy builder is deprecated ...", then builds anyway
+      #   DOCKER_BUILDKIT=1  "ERROR: BuildKit is enabled but the buildx component is missing"
+      #
+      # The builder is chosen by the CLIENT, and the apk docker-cli carries no buildx plugin, so
+      # every image this repository ever published came off the LEGACY builder without saying so.
+      #
+      # THAT IS WHAT BROKE THE RELEASE OF 2026-08-11, and it is a property of this host rather than
+      # bad luck. The legacy builder keeps its cache as untagged intermediate images; this host's
+      # dockerd runs the containerd image store, whose GC collects an image nothing references. Two
+      # builds of this one Dockerfile run CONCURRENTLY on it — this pipeline on main and the same
+      # pipeline on environment/dev — and they share the whole early cache chain, so one cache-hit
+      # an intermediate and seconds later died on "failed to export image: No such image".
+      # Buildkit's cache lives in buildkit's own store, held by the build that is using it, and has
+      # no such window.
+      #
+      # The guard retires itself: the day node-docker-base ships docker-cli-buildx the apk line is a
+      # no-op and nothing here changes. `DOCKER_BUILDKIT=1` is what makes a missing plugin a hard
+      # error instead of a silent fall back to the builder this prelude exists to leave.
+      #
+      # BUILDX_NO_DEFAULT_ATTESTATIONS=1 keeps the PUSHED shape byte-for-byte what it is today. Left
+      # on, buildx wraps the image in a manifest list and adds a provenance attestation manifest —
+      # and this is the first buildkit-built image on this platform, so qits-artifacts and
+      # qits-deployments have only ever been handed a single manifest. This change is about which
+      # builder runs, not about what lands in the registry.
+      docker buildx version >/dev/null 2>&1 || apk add --no-cache docker-cli-buildx
+      export DOCKER_BUILDKIT=1 BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-gateway:$QITS_CI_SHA"
       docker build -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=local .
       docker push "$ref"
-      docker rmi "$ref" || true
+      # NO `docker rmi "$ref"` any more: it freed nothing a CI host wants back — the layers stay in
+      # buildkit's cache either way — while under the containerd image store it drops the last
+      # reference to content a concurrent build of this same Dockerfile may still be resolving,
+      # which is the race this whole change undoes.
 
   - image: qits/build-images/node-base:latest
     branches:

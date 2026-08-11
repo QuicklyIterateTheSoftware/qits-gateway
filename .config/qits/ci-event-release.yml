@@ -26,9 +26,9 @@
 #
 # THE BUILD BELOW IS ci-post-receive.yml's, AND THE TWO MUST STAY MATCHED. Both pipelines publish
 # the same image content under two coordinates, so a fix to one build belongs in the other. That
-# file is where the two halves, the submodule fetch, the lockfile origin swap and the
-# `npm_config_*` environment are explained at length; this one carries the short form and points
-# there rather than keeping a second copy of the reasoning to drift.
+# file is where the two halves, the submodule fetch, the lockfile origin swap, the `npm_config_*`
+# environment and the buildkit prelude are explained at length; this one carries the short form and
+# points there rather than keeping a second copy of the reasoning to drift.
 #
 # THE LANDING SPA IS PACKAGED, NOT INSTALLED BY THE IMAGE BUILD. src/main/webui is the qits-spa-home
 # submodule and it is built HERE, in this step container, which sits on qits-net and can reach the
@@ -56,10 +56,11 @@ steps:
     docker: true
     timeout-seconds: 3600
     script: |
-      # The daemon runs this with `bash -c` and no -e, so without this a failed docker build is
-      # swallowed: the push fails, `docker rmi || true` answers 0, and the run reports SUCCESS — and
-      # a green release run is what makes qits-ci announce the artifact. -u makes an unset registry
-      # variable stop the step too.
+      # The daemon runs this with `bash -c` and no -e, so without this a failure in the middle — a
+      # refused submodule fetch, a broken `npm ci`, a failed docker build — is swallowed by the next
+      # command's exit code and the run reports SUCCESS. A green release run is what makes qits-ci
+      # announce the artifact, so it has to mean the image really was built and pushed. -u makes an
+      # unset registry variable stop the step too.
       set -eu
 
       # THE EVENT, READ AS DATA. The payload reaches the container verbatim as one string in
@@ -117,7 +118,17 @@ steps:
       cd -
 
       # --- half two: the image ------------------------------------------------------------------
+      # BUILDKIT, and the plugin first: node-docker-base's apk docker-cli carries no buildx, so a
+      # plain `docker build` from this image is a LEGACY build and says so only in a deprecation
+      # line. That builder's untagged cache intermediates are collectable by the containerd image
+      # store this host runs, and this build races a concurrent one of the same Dockerfile — which
+      # is how a release died on "failed to export image: No such image". ci-post-receive.yml
+      # carries the measured detail; the two preludes must stay identical.
+      docker buildx version >/dev/null 2>&1 || apk add --no-cache docker-cli-buildx
+      export DOCKER_BUILDKIT=1 BUILDX_NO_DEFAULT_ATTESTATIONS=1
+
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-gateway:$QITS_CI_SHA"
       docker build -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=local .
       docker push "$ref"
-      docker rmi "$ref" || true
+      # NO `docker rmi "$ref"`: on a CI host it frees nothing (the layers stay in buildkit's cache)
+      # and it drops the last reference to content a concurrent build may still be resolving.
