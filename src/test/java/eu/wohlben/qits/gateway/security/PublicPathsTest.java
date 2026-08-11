@@ -75,7 +75,7 @@ class PublicPathsTest {
   class OnAService {
 
     @Test
-    void theGitHostSubtreeIsPublicUnderItsOwnSegment() {
+    void theGitProtocolSubtreeIsPublic() {
       // Smart-HTTP, both address schemes qits-githost serves.
       assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
       assertTrue(PublicPaths.isPublic("GET", "/git/proj-1/repo/git-receive-pack"));
@@ -85,6 +85,27 @@ class PublicPathsTest {
 
       assertFalse(PublicPaths.isPublic("GET", "/git")); // only the subtree, not the bare listing
       assertFalse(PublicPaths.isPublic("GET", "/gitignore")); // prefix must not bleed
+    }
+
+    @Test
+    void theGitHostsOwnSegmentIsNotPublic() {
+      // The service took the segment /githost when it grew a SPA, and none of it joins this list:
+      // a page and its API are read by a browser, which has a session. Only the protocol address
+      // above is token-free, because only its callers cannot hold a token.
+      assertFalse(PublicPaths.isPublic("GET", "/githost"));
+      assertFalse(PublicPaths.isPublic("GET", "/githost/"));
+      assertFalse(PublicPaths.isPublic("GET", "/githost/api/repositories"));
+      assertFalse(PublicPaths.isPublic("GET", "/githost/q/health/ready"));
+      // And the protocol entry must not bleed into it, in either direction.
+      assertFalse(PublicPaths.isPublic("GET", "/githost/abc-123/info/refs"));
+    }
+
+    @Test
+    void theMirrorIsNotPublic() {
+      // qits-platform-mirror is routed and navigable, and nothing of it is token-free: its
+      // protocol clients reach it on qits-net, not through the front door.
+      assertFalse(PublicPaths.isPublic("GET", "/mirror"));
+      assertFalse(PublicPaths.isPublic("GET", "/mirror/q/health/ready"));
     }
 
     @Test
@@ -241,8 +262,8 @@ class PublicPathsTest {
     @Test
     void containerFacingPathsAreNoLongerPublic() {
       // /git/** is NOT on this list any more, and it is the one spelling that came back rather than
-      // died: it is qits-githost's own segment now, not a monolith-relative form. See
-      // OnAService.theGitHostSubtreeIsPublicUnderItsOwnSegment.
+      // died: it is the address git clients hardcode, routed to qits-githost as an extra prefix,
+      // not a monolith-relative form. See OnAService.theGitProtocolSubtreeIsPublic.
       assertFalse(PublicPaths.isPublic("GET", "/mcp"));
       assertFalse(PublicPaths.isPublic("GET", "/mcp/repository"));
       assertFalse(PublicPaths.isPublic("GET", "/api/workspace-daemon/w1"));
@@ -260,6 +281,8 @@ class PublicPathsTest {
     /** The segment-prefixed forms are the live ones, and stay public. */
     @Test
     void theSegmentPrefixedFormsStillAre() {
+      // /git is the exception to the heading: an extra prefix rather than a segment, kept because
+      // a clone url cannot be told a new address.
       assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
       assertTrue(PublicPaths.isPublic("GET", "/artifacts/api/repositories/ci-screenshots/blobs"));
       assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/traces"));

@@ -51,8 +51,9 @@ public enum QitsService {
   /**
    * qits-artifacts, which additionally claims {@code /v2} — the OCI Distribution API root. Docker
    * and podman resolve image references against {@code <host>/v2/…} and accept no path prefix, so
-   * the registry has no {@code /artifacts/…} spelling for the gateway to route instead. It is the
-   * first and so far only prefix in the system that is not a service segment.
+   * the registry has no {@code /artifacts/…} spelling for the gateway to route instead. It was the
+   * first prefix in the system that is not a service segment, and is now one of two: {@link
+   * #GITHOST} carries {@code /git} for the same kind of reason.
    */
   ARTIFACTS("Artifacts", 3, "/v2"),
   OBSERVABILITY("Observability", 7),
@@ -79,23 +80,46 @@ public enum QitsService {
    */
   DOCS("Docs", 8),
   /**
-   * qits-githost — the git smart-HTTP host, and <b>deliberately unlabelled</b>: git is a protocol,
-   * not a page. A navigation entry would link a browser at a transport.
+   * qits-githost — the git host: a page at {@code /githost}, and the git protocol at {@code /git}.
    *
-   * <p><b>The one service whose segment is not its name with {@code qits-} dropped.</b> Everywhere
-   * else that derivation is the rule; here it would give {@code /githost}, and the address is
-   * {@code /git} — {@code GitHostRoutes.BASE} in that repository, with its non-application root at
-   * {@code /git/q}. Routing is verbatim, so the segment has to be what the service serves, and what
-   * it serves is what its clients already hardcode: every clone url a person copies, every
-   * workspace container's remote, and qits-ci's config reads at {@code
-   * <host>/git/<repoId>/blob/<rev>/<path>}. The constant is named for the segment rather than the
-   * repository so that {@link #segment()} stays a derivation with no per-constant override — which
-   * is the same reason {@code PLATFORM_DEPLOYMENTS} is not called {@code DEPLOYMENTS}.
+   * <p><b>The derivation rule holds here, and this constant used to say it did not.</b> It was
+   * {@code GIT}, unlabelled, and it explained at length why {@code qits-githost} could not be
+   * reached at {@code /githost}. Both of those facts are gone: the service now serves a SPA of its
+   * own through Quinoa, so the segment is the repository name with {@code qits-} dropped like every
+   * sibling's — the page at {@code /githost}, its API at {@code /githost/api} and its
+   * non-application root at {@code /githost/q} — and a page is something a menu can link to, so it
+   * carries a label.
+   *
+   * <p><b>{@code /git} rides along as an extra prefix</b>, which is exactly the case {@link
+   * #pathPrefixes()} exists for: a protocol whose client hardcodes an address we do not choose.
+   * Every clone url a person copies, every workspace container's remote and qits-ci's config reads
+   * at {@code <host>/git/<repoId>/blob/<rev>/<path>} spell {@code /git/…}, and git has no way of
+   * being told otherwise. So the protocol keeps its address, the SPA takes the segment, and one
+   * {@code proxy-hosts.githost} entry routes both to the same upstream.
    *
    * <p>It moved here from qits-artifacts, which served the same routes under {@code /artifacts/git}
    * until the byte-plane split: a repository is not an artifact, it only shared the storage layout.
    */
-  GIT;
+  GITHOST("Githost", 9, "/git"),
+  /**
+   * qits-platform-mirror — the platform's pull-through caches (npmjs, Maven Central, and the OCI
+   * registries it fronts). <b>Platform-scoped</b>: one per platform rather than one per
+   * environment, routed cross-tier the way qits-artifacts was before the byte-plane split.
+   *
+   * <p><b>{@code MIRROR}, not {@code PLATFORM_MIRROR}</b>, because the segment has to be {@code
+   * mirror}: the service's own configuration already claims {@code
+   * quarkus.http.non-application-root-path=/mirror/q}. The constant is named for the segment so
+   * that {@link #segment()} stays a derivation with no per-constant override — the same reason
+   * {@code PLATFORM_DEPLOYMENTS} is not called {@code DEPLOYMENTS}.
+   *
+   * <p><b>Its protocol routes are deliberately not extra prefixes here.</b> The npm, maven and OCI
+   * wires are literals in the qits-registries jars — {@code /artifacts/npm}, {@code
+   * /artifacts/maven} and {@code /v2} — which are qits-artifacts' addresses today, and two services
+   * cannot both hold one prefix behind one gateway. Moving the clients over (npm scoped registries,
+   * dockerd registry-mirrors, the maven repository list) is a separate work package that has not
+   * started. Until it does, this entry routes the segment and nothing else.
+   */
+  MIRROR("Mirror", 10);
 
   /**
    * The {@link #navigationPosition()} of a service that is not in the navigation. Never compared

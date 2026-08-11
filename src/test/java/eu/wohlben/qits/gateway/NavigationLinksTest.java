@@ -87,6 +87,18 @@ class NavigationLinksTest {
   }
 
   @Test
+  void theGitProtocolRootIsNeverALinkAndTheGitHostAppearsOnce() {
+    // The git host claims two prefixes from one proxy-hosts entry, the same shape artifacts has:
+    // /githost is the SPA a user opens, /git is the address a clone hardcodes. Only the first is a
+    // page, and the service must not appear twice for serving both.
+    List<Link> links = NavigationRoute.links(routesFor(QitsService.GITHOST));
+
+    assertEquals(List.of("Home", "Githost"), labels(links));
+    assertEquals(List.of("/", "/githost/"), hrefs(links));
+    assertFalse(hrefs(links).contains("/git/"));
+  }
+
+  @Test
   void theOrderIsTheEnumsAndNotTheRouteTables() {
     // The route table is sorted longest-prefix-first, which is a MATCHING concern: read off it, the
     // menu would start with /platform-deployments because that segment is the longest string. The
@@ -94,12 +106,14 @@ class NavigationLinksTest {
     List<Link> links =
         NavigationRoute.links(
             routesFor(
+                QitsService.MIRROR,
                 QitsService.DOCS,
                 QitsService.OBSERVABILITY,
                 QitsService.EVENTS,
                 QitsService.WORKSPACES,
                 QitsService.PROJECTS,
                 QitsService.ARTIFACTS,
+                QitsService.GITHOST,
                 QitsService.PLATFORM_DEPLOYMENTS,
                 QitsService.CI));
 
@@ -113,8 +127,24 @@ class NavigationLinksTest {
             "Workspaces",
             "Events",
             "Observability",
-            "Docs"),
+            "Docs",
+            "Githost",
+            "Mirror"),
         labels(links));
+    assertEquals(
+        List.of(
+            "/",
+            "/ci/",
+            "/platform-deployments/",
+            "/artifacts/",
+            "/projects/",
+            "/workspaces/",
+            "/events/",
+            "/observability/",
+            "/docs/",
+            "/githost/",
+            "/mirror/"),
+        hrefs(links));
   }
 
   @Test

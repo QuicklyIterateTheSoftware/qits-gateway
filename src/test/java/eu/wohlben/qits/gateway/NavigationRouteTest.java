@@ -14,8 +14,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * {@code GET /main-navigation} against a real route table: {@link StubUpstream} routes {@code
- * artifacts}, {@code observability} and {@code projects} and nothing else, so what this asserts is
- * the derivation running end to end on a gateway's actual configuration rather than on a list.
+ * artifacts}, {@code observability}, {@code projects} and {@code githost} and nothing else, so what
+ * this asserts is the derivation running end to end on a gateway's actual configuration rather than
+ * on a list.
  *
  * <p>Named caller like {@code GatewayRoutingTest}, for the same reason: this is a test about the
  * document, not about who may read it. That the path is reachable with no session at all — the
@@ -28,17 +29,32 @@ class NavigationRouteTest {
 
   @Test
   void theNavigationIsExactlyTheRoutedServices() {
-    // Home first and always; then the three configured services in the enum's order (artifacts 3,
-    // projects 4, observability 7) rather than the route table's longest-prefix one. Everything
-    // else in the registry is unconfigured here, so it has no link — which is the whole point.
+    // Home first and always; then the four configured services in the enum's order (artifacts 3,
+    // projects 4, observability 7, githost 9) rather than the route table's longest-prefix one.
+    // Everything else in the registry is unconfigured here, so it has no link — the whole point.
     given()
         .when()
         .get("/main-navigation")
         .then()
         .statusCode(200)
         .contentType(containsString("application/json"))
-        .body("links.label", contains("Home", "Artifacts", "Projects", "Observability"))
-        .body("links.href", contains("/", "/artifacts/", "/projects/", "/observability/"));
+        .body("links.label", contains("Home", "Artifacts", "Projects", "Observability", "Githost"))
+        .body(
+            "links.href",
+            contains("/", "/artifacts/", "/projects/", "/observability/", "/githost/"));
+  }
+
+  @Test
+  void aProtocolPrefixIsNeverOfferedAsAPage() {
+    // githost is routed here and produces a second route for /git, the address git clients
+    // hardcode. It reaches the upstream (GatewayRoutingTest) and it is not a page — the same rule
+    // /v2 follows, and the reason the dedupe is per SERVICE rather than per route.
+    given()
+        .when()
+        .get("/main-navigation")
+        .then()
+        .statusCode(200)
+        .body("links.href", everyItem(not(is("/git/"))));
   }
 
   @Test
@@ -56,15 +72,17 @@ class NavigationRouteTest {
 
   @Test
   void anUnroutedServiceGetsNoLink() {
-    // `stt` is unconfigured here AND unlabelled, `ci` is labelled but unconfigured. Neither is
-    // reachable through this gateway, so neither may be offered.
+    // `stt` is unconfigured here AND unlabelled, `ci` and `mirror` are labelled but unconfigured.
+    // None is reachable through this gateway, so none may be offered: a label is not a link, a
+    // route is.
     given()
         .when()
         .get("/main-navigation")
         .then()
         .statusCode(200)
         .body(not(containsString("/stt/")))
-        .body(not(containsString("\"CI\"")));
+        .body(not(containsString("\"CI\"")))
+        .body(not(containsString("/mirror/")));
   }
 
   @Test

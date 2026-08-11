@@ -140,9 +140,10 @@ public class RouteTable {
   /**
    * Turn a {@code proxy-hosts} value ({@code host} or {@code host:port}) into that service's routes
    * — one per {@link QitsService#pathPrefixes() claimed prefix}, all pointing at the same upstream.
-   * Almost always a single-element list; the exception is a protocol root a client hardcodes
-   * (qits-artifacts' {@code /v2}), which has to reach the same container as {@code /artifacts} from
-   * the same single configuration entry, without a deployment naming it twice.
+   * Almost always a single-element list; the exceptions are the protocol roots a client hardcodes
+   * (qits-artifacts' {@code /v2}, qits-githost's {@code /git}), which have to reach the same
+   * container as their segment from the same single configuration entry, without a deployment
+   * naming it twice.
    */
   private static List<GatewayRoute> toServiceRoutes(QitsService service, String hostPort) {
     String value = hostPort == null ? "" : hostPort.trim();

@@ -73,14 +73,20 @@ and a client reaches the gateway directly — that deployment is supported and u
 here may assume it. The one place the difference is load-bearing is the [header
 contract](#security-posture).
 
-A service may claim **one additional, root-level prefix** when a protocol client hardcodes an
-address the gateway does not get to choose. There is exactly one today: `qits-artifacts` also claims
-`/v2`, the OCI Distribution API root, because docker and podman resolve an image reference against
-`<host>/v2/` and accept no path prefix — so the registry has no `/artifacts/…` spelling to route
-instead. It rides the **artifacts** `proxy-hosts` entry: there is no `…_V2` key (naming one is still
-an "unknown qits service" startup error), no second host for a deployment to hold in sync, and no
-phantom component in the startup log or the readiness payload. It is not an alias mechanism —
-`/artifacts/v2` is not a second address for it, and does not exist.
+A service may claim **additional, root-level prefixes** when a protocol client hardcodes an address
+the gateway does not get to choose. There are exactly two today:
+
+- `qits-artifacts` also claims **`/v2`**, the OCI Distribution API root, because docker and podman
+  resolve an image reference against `<host>/v2/` and accept no path prefix — so the registry has no
+  `/artifacts/…` spelling to route instead.
+- `qits-githost` also claims **`/git`**, the git smart-HTTP root, because every clone url a person
+  copies, every workspace container's remote and every qits-ci config read spells `/git/…` — and a
+  git client cannot be told a new address.
+
+Each rides its service's own `proxy-hosts` entry: there is no `…_V2` and no `…_GIT` key (naming one
+is still an "unknown qits service" startup error), no second host for a deployment to hold in sync,
+and no phantom component in the startup log or the readiness payload. It is not an alias mechanism —
+`/artifacts/v2` is not a second address for the registry, and does not exist.
 
 The set of services the gateway can front is a **named registry** — the `QitsService` enum. A
 service's public identity drops the `qits-` prefix, so `qits-artifacts` is reached at `/artifacts/*`
@@ -254,22 +260,32 @@ is rejected at startup. Each is reached at `/<segment>/*` and forwarded verbatim
 | `qits-ci` | `ci` | `/ci/*` | CI (1) |
 | `qits-platform-deployments` | `platform-deployments` | `/platform-deployments/*` | Deployments (2) |
 | `qits-docs` | `docs` | `/docs/*` | Docs (8) |
-| `qits-githost` | `git` ᵇ | `/git/*` | — |
+| `qits-githost` | `githost` | `/githost/*`, `/git/*` ᵇ | Githost (9) |
+| `qits-platform-mirror` | `mirror` | `/mirror/*` | Mirror (10) |
 
 ᵃ `/v2/*` is the OCI registry root, claimed by the artifacts entry rather than by a key of its own —
-see "The routing model". It is the only prefix in the system that is not a service segment.
+see "The routing model". One of two prefixes in the system that are not service segments.
 
-ᵇ The one segment that is not its repository name with `qits-` dropped. qits-githost serves `/git`
-(`GitHostRoutes.BASE`, with its non-application root at `/git/q`), routing here is verbatim, and the
-address is one its clients hardcode — every clone url a person copies, every workspace container's
-remote, and qits-ci's config reads at `<host>/git/<repoId>/blob/<rev>/<path>`. So the segment is
-`git`, the enum constant is `GIT`, and the key is `qits.gateway.proxy-hosts.git`
-(`QITS_GATEWAY_PROXY_HOSTS_GIT`). It was `/artifacts/git/*` until the byte-plane split moved the git
-host out of qits-artifacts.
+ᵇ `/git/*` is the git smart-HTTP root, claimed by the **githost** entry the same way — one key
+(`qits.gateway.proxy-hosts.githost`, `QITS_GATEWAY_PROXY_HOSTS_GITHOST`), two prefixes, one
+upstream. The segment is the repository name with `qits-` dropped like every other, because
+qits-githost serves a page there (`/githost`, its API at `/githost/api`, its non-application root at
+`/githost/q`); `/git` rides along because git clients hardcode it — every clone url a person copies,
+every workspace container's remote, and qits-ci's config reads at
+`<host>/git/<repoId>/blob/<rev>/<path>`. This entry was segment `git` (constant `GIT`) until the SPA
+landed, and `/artifacts/git/*` before the byte-plane split moved the git host out of qits-artifacts.
+
+qits-platform-mirror is **platform-scoped** — one per platform, routed cross-tier the way
+qits-artifacts is. Its constant is `MIRROR` rather than `PLATFORM_MIRROR` because the segment has to
+be `mirror`: the service already claims `/mirror/q` as its non-application root, and a constant is
+named for the segment so the derivation needs no per-constant override. Its npm, maven and OCI wires
+(`/artifacts/npm`, `/artifacts/maven`, `/v2`) are deliberately **not** extra prefixes here: those are
+qits-artifacts' addresses today, two services cannot hold one prefix behind one gateway, and moving
+the clients over (npm scoped registries, dockerd `registry-mirrors`, the maven repository list) is a
+separate work package.
 
 ᶜ The label and place this service takes in [`/main-navigation`](#main-navigation) when it is routed;
-`—` means it is routable but never shown. `stt` is an API with no SPA behind it; `git` is a
-protocol, and a menu entry would link a browser at a transport.
+`—` means it is routable but never shown. `stt` is the only one: an API with no SPA behind it.
 
 `qits-platform-deployments` owns environment topology and deployment execution in one service. It
 replaced the retired `qits-cd`, whose `cd` segment is gone from the registry — a `proxy-hosts.cd`
@@ -293,6 +309,8 @@ enum when a new component splits out. As environment variables, for a gateway se
 QITS_GATEWAY_PROXY_HOSTS_ARTIFACTS=qits-platform-artifacts
 QITS_GATEWAY_PROXY_HOSTS_CI=prod-qits-ci
 QITS_GATEWAY_PROXY_HOSTS_OBSERVABILITY=prod-qits-observability:9000   # host:port when not on 8080
+QITS_GATEWAY_PROXY_HOSTS_GITHOST=prod-qits-githost   # routes /githost/* and /git/* alike
+QITS_GATEWAY_PROXY_HOSTS_MIRROR=qits-platform-mirror
 QITS_GATEWAY_PROXY_HOSTS_PLATFORM_DEPLOYMENTS=qits-platform-deployments   # dashed segment
 ```
 
@@ -423,8 +441,9 @@ expires:
 
 - the gateway's own surface (`/q/*`, `/api/auth/*`, `/api/config.json`, `/main-navigation`) —
   permanent;
-- the segment-prefixed forms a split-out service serves (`/git/*`,
-  `/observability/api/otel/*`, `/workspaces/daemon/*`, `/projects/mcp`, …) —
+- the forms a split-out service serves — segment-prefixed except where a protocol client fixes the
+  address (`/observability/api/otel/*`, `/workspaces/daemon/*`, `/projects/mcp`, and git's `/git/*`)
+  —
   permanent, and identical to the address the service serves on `qits-net` because forwarding is
   verbatim. **An entry here lives exactly as long as its token-free caller does**: `/ci/api/events/*`
   was on this list for the git host's post-receive hook, and left it when a push became a durable
@@ -448,11 +467,14 @@ now name no upstream, so they are neither routed nor public — `PublicPathsTest
 silently reopening an anonymous surface.
 
 `/git/*` was in that group and is the one spelling that came back, which is worth being precise
-about: it is not the monolith's path returning, it is qits-githost's own segment. The git host left
+about: it is not the monolith's path returning, it is the address git clients hardcode, routed to
+qits-githost as an extra prefix beside that service's `/githost` segment. The git host left
 qits-artifacts in the byte-plane split, so `/artifacts/git/*` is the spelling that died and
 `/git/*` is a real route with a real upstream behind it. The exemption's **scope** is unchanged —
 the same subtree, covering the smart-HTTP endpoints and the blob/tree content reads qits-ci makes
-instead of cloning, with the bare `/git` listing and `/git/q` still behind the session policy.
+instead of cloning, with the bare `/git` listing behind the session policy. So is the whole of
+`/githost/*`, including `/githost/q`: a page and its API are read by a browser, and a browser has a
+session.
 Session-free is not auth-free: the git host's push token (`-o qits.token=…`) and its machine claims
 are the actual authorization, exactly as they were under the old prefix. What the entry says is only
 that a caller with no browser session may reach them, which is every caller git has — a clone cannot
@@ -562,9 +584,10 @@ The rules, all of them:
 - **`Home` is prepended unconditionally.** The landing SPA is this process' own static output, not a
   `QitsService`, so it is in no route table — and it is never missing, because it is compiled into
   the binary.
-- **One link per service, not per route.** `qits-artifacts` produces two routes from its single
-  `proxy-hosts` entry, and **`/v2` never appears**: it is the address docker hardcodes for the OCI
-  Distribution API, a protocol root rather than a page.
+- **One link per service, not per route.** `qits-artifacts` and `qits-githost` each produce two
+  routes from a single `proxy-hosts` entry, and **neither extra prefix ever appears**: `/v2` is the
+  address docker hardcodes for the OCI Distribution API and `/git` the one git clients hardcode —
+  protocol roots rather than pages. The links point at `/artifacts/` and `/githost/`.
 - **A service with no label is not in the navigation** — `stt` (an API with no SPA behind it) and
   `cd` (superseded by `platform-deployments`, which carries the *Deployments* entry). Both omissions
   are decisions rather than gaps; the enum says so on each constant and `QitsServiceTest` holds it.
@@ -581,7 +604,8 @@ A gateway routing the whole registry above answers, in this order:
           {"label":"Deployments","href":"/platform-deployments/"},
           {"label":"Artifacts","href":"/artifacts/"},{"label":"Projects","href":"/projects/"},
           {"label":"Workspaces","href":"/workspaces/"},{"label":"Events","href":"/events/"},
-          {"label":"Observability","href":"/observability/"},{"label":"Docs","href":"/docs/"}]}
+          {"label":"Observability","href":"/observability/"},{"label":"Docs","href":"/docs/"},
+          {"label":"Githost","href":"/githost/"},{"label":"Mirror","href":"/mirror/"}]}
 ```
 
 An **object** with a `links` array, not a bare array, so this document can grow a second field
