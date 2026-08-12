@@ -138,4 +138,12 @@ USER 1001
 
 # The route table is configuration: pass it as env (QITS_GATEWAY_ROUTES_<NAME>_HOST=…) or mount an
 # application.properties next to the binary. See README.md.
-ENTRYPOINT ["/work/qits-gateway", "-Dquarkus.http.host=0.0.0.0"]
+#
+# networkaddress.cache.negative.ttl=0 because under swarm a service's DNS name appears only once its
+# task passes its healthcheck, and the JDK caches a FAILED lookup for 10s by default — so the front
+# door would keep answering 502 for up to ten seconds after an upstream became resolvable. It has to
+# be this JDK property: quarkus.vertx.resolver.cache-negative-time-to-live is inert while
+# quarkus.vertx.use-async-dns stays false (the default), which sets vertx.disableDnsResolver=true
+# and puts every lookup through the JDK's blocking resolver. GraalVM native reads the property at
+# runtime, so the entrypoint is where it belongs.
+ENTRYPOINT ["/work/qits-gateway", "-Dquarkus.http.host=0.0.0.0", "-Dnetworkaddress.cache.negative.ttl=0"]

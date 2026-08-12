@@ -124,24 +124,39 @@ public class GatewayRouter {
    */
   private EdgeHeaders edgeHeaders;
 
+  /**
+   * The proxy client's options, built here rather than inline so the values below can be asserted
+   * without booting the application — see {@code GatewayProxyClientOptionsTest}.
+   *
+   * <p>The two timeouts point in opposite directions on purpose, and both are load-bearing.
+   */
+  static HttpClientOptions proxyClientOptions(int connectTimeoutMs) {
+    return new HttpClientOptions()
+        .setKeepAlive(true)
+        // Vert.x pools per ORIGIN and defaults to FIVE connections, behind an unbounded
+        // wait queue. A single `docker push` opens up to five concurrent layer uploads on
+        // its own (--max-concurrent-uploads defaults to 5) and each holds its connection
+        // for the whole of a multi-minute transfer — so on the default, one push saturates
+        // the artifacts origin and everything else routed there (blob reads served as <img>
+        // srcs, `git clone`, the CI post-receive fetches) queues behind it with nothing
+        // logged anywhere to say why.
+        .setMaxPoolSize(64)
+        // Stated rather than inherited. Zero — no client-side idle timeout — is already the
+        // default and has to stay: quarkus.http.idle-timeout=1H keeps the inbound half of a
+        // long exchange alive, and a timeout here would sever exactly what that setting
+        // exists for: SSE channels, HMR sockets, and a slow layer push.
+        .setIdleTimeout(0)
+        // The OTHER timeout, and not a contradiction of the line above: this one bounds only the
+        // wait for a TCP connection, before there is an exchange to keep alive. Vert.x defaults to
+        // 60s, and under swarm a service name resolves to a virtual IP that exists before any task
+        // is healthy — so a connection to a starting upstream is dropped rather than refused, and
+        // every request to it hung for a full minute before the proxy's 502. See
+        // GatewayConfig.connectTimeoutMs.
+        .setConnectTimeout(connectTimeoutMs);
+  }
+
   void init(@Observes Router router) {
-    client =
-        vertx.createHttpClient(
-            new HttpClientOptions()
-                .setKeepAlive(true)
-                // Vert.x pools per ORIGIN and defaults to FIVE connections, behind an unbounded
-                // wait queue. A single `docker push` opens up to five concurrent layer uploads on
-                // its own (--max-concurrent-uploads defaults to 5) and each holds its connection
-                // for the whole of a multi-minute transfer — so on the default, one push saturates
-                // the artifacts origin and everything else routed there (blob reads served as <img>
-                // srcs, `git clone`, the CI post-receive fetches) queues behind it with nothing
-                // logged anywhere to say why.
-                .setMaxPoolSize(64)
-                // Stated rather than inherited. Zero — no client-side idle timeout — is already the
-                // default and has to stay: quarkus.http.idle-timeout=1H keeps the inbound half of a
-                // long exchange alive, and a timeout here would sever exactly what that setting
-                // exists for: SSE channels, HMR sockets, and a slow layer push.
-                .setIdleTimeout(0));
+    client = vertx.createHttpClient(proxyClientOptions(config.connectTimeoutMs()));
     // Nothing the interceptor does is route-specific (verbatim forwarding), so one is shared.
     edgeHeaders = new EdgeHeaders(config.forwarded());
     for (GatewayRoute route : routeTable.routes()) {
