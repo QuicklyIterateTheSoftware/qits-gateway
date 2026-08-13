@@ -44,6 +44,22 @@ public interface GatewayConfig {
    */
   Map<String, String> proxyHosts();
 
+  /**
+   * How long the proxy waits for a TCP connection to an upstream, in milliseconds.
+   *
+   * <p>Vert.x defaults to 60 000, which was harmless while every upstream was a container name that
+   * either resolved to a live process or refused the connection at once. Under swarm it is not: a
+   * service name resolves to a virtual IP that exists before any task is healthy, so a connection
+   * to an upstream that is still starting is not refused — it is dropped, and the request hangs for
+   * the whole timeout before the proxy answers 502. Five seconds keeps the front door's failure
+   * fast, which is what a client (and a health probe) can act on.
+   *
+   * <p>This is the CONNECT phase only. It has nothing to do with the idle timeout, which is 0 for
+   * SSE channels, WebSocket terminals and slow layer pushes — see {@code GatewayRouter}.
+   */
+  @WithDefault("5000")
+  int connectTimeoutMs();
+
   /** Edge-header handling — what the gateway tells upstreams about the original client. */
   Forwarded forwarded();
 
