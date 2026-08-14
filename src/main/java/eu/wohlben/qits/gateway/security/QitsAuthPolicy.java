@@ -43,8 +43,8 @@ public class QitsAuthPolicy implements HttpSecurityPolicy {
       Uni<SecurityIdentity> deferredIdentity,
       AuthorizationRequestContext requestContext) {
     // normalizedPath(): dot-segments and duplicate slashes are already collapsed, so a path like
-    // /api/../git/x cannot spoof its way into a public prefix. The method rides along for the one
-    // entry that is public for reads only (the registry).
+    // /api/../git/x cannot spoof its way into a public prefix. The method rides along because no
+    // caller here would have to reconstruct it; no allowlist entry reads it today.
     if (PublicPaths.isPublic(context.request().method().name(), context.normalizedPath())) {
       return CheckResult.permit();
     }

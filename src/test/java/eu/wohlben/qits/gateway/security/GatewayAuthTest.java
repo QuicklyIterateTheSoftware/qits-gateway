@@ -45,20 +45,27 @@ class GatewayAuthTest {
   }
 
   @Test
-  void theRegistryVersionProbeIsAnsweredRatherThanRedirected() {
-    // Anonymous, and it must be a 200. A registry client sends no Sec-Fetch-Mode, no
-    // X-Requested-With and no Accept: text/event-stream, so NonNavigationRequestChecker keeps the
-    // redirect default — meaning an unlisted /v2 would 302 into Keycloak's HTML login, which docker
-    // reads as "not a v2 registry". PublicPaths is what prevents that, and this is the proof.
-    given().redirects().follow(false).when().get("/v2/").then().statusCode(200);
+  void anAnonymousPullIsRefusedAtTheGatewayAndNeverReachesTheRegistry() {
+    // This used to answer 200: /v2 was public for GET/HEAD so a docker pull through the gateway
+    // stayed anonymous. Registry traffic rides the edge's registry vhost now, which is where the
+    // anonymous read is granted, and the exemption here was a way around that vhost's policy — an
+    // environment host reaching the registry with no identity at all. Nothing in the network pulls
+    // through the gateway, so the exemption had no caller left.
+    given()
+        .redirects()
+        .follow(false)
+        .when()
+        .get("/v2/qits/alpine/manifests/latest")
+        .then()
+        .statusCode(302)
+        .header("location", containsString("/protocol/openid-connect/auth"));
   }
 
   @Test
-  void aStoredCredentialOnAPullStillReachesTheRegistry() {
-    // docker sends stored Basic credentials on reads too once a host has any in its config. The
-    // registry ignores them (it carries no auth at all), but the gateway must neither let hybrid
-    // quarkus-oidc eat a non-Bearer Authorization on a public path nor challenge because of it —
-    // otherwise a host that ever logged in anywhere pulls differently than a clean one.
+  void aStoredCredentialDoesNotBuyAPullEither() {
+    // docker sends stored Basic credentials on reads once a host has any in its config. A
+    // non-Bearer Authorization is not an identity here, so it earns a 401 rather than the pull it
+    // used to. The body must not carry the stub upstream's echo: the request dies here, not there.
     given()
         .redirects()
         .follow(false)
@@ -66,17 +73,16 @@ class GatewayAuthTest {
         .when()
         .get("/v2/qits/alpine/manifests/latest")
         .then()
-        .statusCode(200)
-        .body(containsString("authorization=Basic cWl0czp0b2tlbg=="));
+        .statusCode(401)
+        .body(not(containsString("authorization=")));
   }
 
   @Test
   void aPushIsRefusedAtTheGatewayAndNeverReachesTheRegistry() {
-    // The registry carries no write guard of its own any more, so THIS refusal is its whole
-    // external write protection: /v2 is public for read methods only, and a write falls back to
-    // the session policy — a challenge no registry client can answer, which is the point (external
-    // push is unwanted entirely; producers dial the registry on qits-net). The body must not carry
-    // the stub upstream's echo: the request has to die here, not there.
+    // A write was refused here even while reads were public, and nothing about it changes: /v2 is
+    // behind the session policy whole now, so a push dies on a challenge no registry client can
+    // answer. The body must not carry the stub upstream's echo: the request has to die here, not
+    // there.
     given()
         .redirects()
         .follow(false)
@@ -98,13 +104,6 @@ class GatewayAuthTest {
         .then()
         .statusCode(302)
         .body(not(containsString("authorization=")));
-  }
-
-  @Test
-  void theRegistryPrefixDoesNotBleedAtThePolicyLayer() {
-    // End-to-end proof that /v2 did not widen into a neighbouring root: /v2x is not the registry,
-    // so it is still challenged like anything else nobody made public.
-    given().redirects().follow(false).when().get("/v2x/y").then().statusCode(302);
   }
 
   @Test

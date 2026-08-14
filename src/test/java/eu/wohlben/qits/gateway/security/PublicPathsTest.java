@@ -118,41 +118,27 @@ class PublicPathsTest {
     }
 
     @Test
-    void theRegistryIsPublicForReadsAndIsTheOneNonSegmentPrefixedEntry() {
-      // docker's version probe, in both the spellings a client actually sends, plus a pull's two
-      // methods — the whole anonymous-pull surface.
-      assertTrue(PublicPaths.isPublic("GET", "/v2"));
-      assertTrue(PublicPaths.isPublic("GET", "/v2/"));
-      assertTrue(PublicPaths.isPublic("GET", "/v2/qits/alpine/manifests/latest"));
-      assertTrue(PublicPaths.isPublic("HEAD", "/v2/qits/alpine/manifests/latest"));
-      // A multi-slash OCI name is still one path under the same root.
-      assertTrue(
+    void nothingOfTheRegistryIsPublicInAnyMethod() {
+      // /v2 WAS public for GET/HEAD, so an anonymous docker pull could resolve an image reference
+      // through the gateway. Registry traffic goes to the edge's registry vhost now, which is
+      // where the anonymous-read/authenticated-write split is made; no in-network consumer routes
+      // a pull through here, so the exemption had no caller left. Reads first — the whole surface
+      // a client sends, in the spellings it sends them:
+      assertFalse(PublicPaths.isPublic("GET", "/v2")); // docker's version probe
+      assertFalse(PublicPaths.isPublic("GET", "/v2/"));
+      assertFalse(PublicPaths.isPublic("GET", "/v2/qits/alpine/manifests/latest"));
+      assertFalse(PublicPaths.isPublic("HEAD", "/v2/qits/alpine/manifests/latest"));
+      assertFalse(
           PublicPaths.isPublic(
               "GET", "/v2/qits/build-images/ci-base/blobs/sha256:" + "0".repeat(64)));
-
-      assertFalse(PublicPaths.isPublic("GET", "/v2x")); // prefix must not bleed
-      assertFalse(PublicPaths.isPublic("GET", "/v20/x"));
-
-      // The registry has exactly ONE address. A prefixed spelling is not a second one, and must not
-      // become public just by looking as though it belongs to artifacts.
-      assertFalse(PublicPaths.isPublic("GET", "/artifacts/v2"));
-      assertFalse(PublicPaths.isPublic("GET", "/artifacts/v2/qits/alpine/manifests/latest"));
-    }
-
-    @Test
-    void registryWritesAreNotPublicAndThatIsTheRegistrysWholeExternalWriteProtection() {
-      // qits-artifacts carries NO push guard of its own any more (producers on qits-net are
-      // trusted; external push is unwanted entirely), so these lines are what stands between the
-      // internet and `docker push`. An anonymous write is challenged for a session no registry
-      // client can answer — deliberately nonfunctional. Widening /v2 back to all methods without
-      // restoring a guard in qits-artifacts opens push to the world; the two move together.
+      // Writes were never public and still are not.
       assertFalse(PublicPaths.isPublic("POST", "/v2/qits/alpine/blobs/uploads/"));
       assertFalse(PublicPaths.isPublic("PATCH", "/v2/qits/alpine/blobs/uploads/session-1"));
       assertFalse(PublicPaths.isPublic("PUT", "/v2/qits/alpine/manifests/latest"));
       assertFalse(PublicPaths.isPublic("DELETE", "/v2/qits/alpine/manifests/latest"));
-      // The probe itself is also read-only territory.
-      assertFalse(PublicPaths.isPublic("POST", "/v2"));
-      assertFalse(PublicPaths.isPublic("POST", "/v2/"));
+      // The registry has exactly ONE address, and the prefixed spelling was never it.
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/v2"));
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/v2/qits/alpine/manifests/latest"));
     }
 
     @Test
