@@ -44,6 +44,7 @@ git submodule update --init src/main/webui      # the landing SPA; package needs
 ./mvnw test                    # unit tests + the end-to-end proxy suite (no docker needed)
 ./mvnw package -Dqits.variant=oauth   # JVM build -> target/quarkus-app/ (the flag is required)
 ./mvnw package -Dqits.variant=local   # the EXPLICITLY UNAUTHENTICATED build; never internet-expose
+./mvnw package -Dqits.variant=edge    # trusts the platform edge's X-Qits-* identity headers
 ./mvnw quarkus:dev             # dev mode on :8000, fronting a qits on localhost:8080
 ./mvnw package -Dnative -Dqits.variant=oauth   # native binary -> target/qits-gateway (no docker)
 ./mvnw test -Dtest=RouteTableTest
@@ -69,7 +70,8 @@ authenticates.
 "the suite against the local target" — it re-augments *every* `@QuarkusTest` into the open target, and
 `GatewayAuthTest` (which asserts the oauth challenge) then fails against a build that has no
 challenge to make. `local` is covered by `LocalVariantTest`'s `@TestProfile`, which flips the same two
-build properties for one class. Use `-Dqits.variant=oauth` for a full `verify`; the enforcer is bound
+build properties for one class; `edge` the same way by `EdgeVariantTest` and `EdgeVariantRoleTest`.
+Use `-Dqits.variant=oauth` for a full `verify`; the enforcer is bound
 to `prepare-package` precisely so everything before it runs flagless.
 
 Spotless (google-java-format) runs automatically at `process-sources`, so formatting is never a
@@ -111,6 +113,8 @@ src/main/java/eu/wohlben/qits/gateway/
     NonNavigationRequestChecker.java   499 instead of 302 for SSE/websocket/XHR (oauth only)
     LocalAuthMechanism.java   the `local` build target's fixed identity (local only)
     LocalIdentityProvider.java
+    EdgeAuthMechanism.java    the `edge` build target: inbound X-Qits-User/-Id/-Roles ARE the
+    EdgeIdentityProvider.java identity — the edge stripped and re-issued them (edge only)
 
 src/main/webui/                 the qits-spa-home submodule — Quinoa's default ui-dir. Not this
                                 repo's code; do not edit it from here, push it in its own repo and
@@ -216,10 +220,10 @@ exception once" is how the monolith's catch-all comes back:
   test harness rather than this code, and a deployed gateway starts once. That is the entire reason
   `GatewaySocketRoutingTest` runs in its own surefire execution — do not fold it back into the main
   one to tidy the pom.
-- **The auth target is a build property, never a runtime key.** `-Dqits.variant=oauth|local` is read
-  at augmentation and baked into the bean set by `@IfBuildProperty`, which is what makes it
+- **The auth target is a build property, never a runtime key.** `-Dqits.variant=oauth|local|edge`
+  is read at augmentation and baked into the bean set by `@IfBuildProperty`, which is what makes it
   impossible for an environment variable to open a production gateway. Any change that lets
-  `local` be selected at runtime defeats the whole design and must not land.
+  `local` or `edge` be selected at runtime defeats the whole design and must not land.
 - The suite must keep running **without docker and without network**: no Keycloak Dev Services, no
   live IdP. `src/test/resources/application.properties` pins a static, never-contacted provider —
   the tests assert that the gateway challenges and where it points, not that a code flow completes.

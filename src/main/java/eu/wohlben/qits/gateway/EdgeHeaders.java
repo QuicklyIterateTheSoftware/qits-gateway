@@ -29,12 +29,13 @@ import java.util.Set;
  *       X-Auth-Request-*} list ({@code qits.gateway.forwarded.strip-request-headers}) covers a
  *       deployment that still fronts the gateway with a forward-auth proxy, whose header names are
  *       the proxy vendor's rather than ours.
- *   <li><b>Assert the authenticated identity</b> — {@code X-Qits-User} and {@code X-Qits-User-Id},
- *       from {@link AssertedIdentity}. This <b>must</b> stay after the strip and in this same
- *       method: the forged header and the trusted one have the same name, so the code that writes
- *       the trusted value has to be downstream of the code that removes the forged one. An
- *       anonymous request asserts nothing, which is how an upstream sees "no name" rather than a
- *       name it cannot trust.
+ *   <li><b>Assert the authenticated identity</b> — {@code X-Qits-User}, {@code X-Qits-User-Id} and,
+ *       where the target has roles to forward, {@code X-Qits-Roles} — from {@link
+ *       AssertedIdentity}. This <b>must</b> stay after the strip and in this same method: the
+ *       forged header and the trusted one have the same name, so the code that writes the trusted
+ *       value has to be downstream of the code that removes the forged one. An anonymous request
+ *       asserts nothing, which is how an upstream sees "no name" rather than a name it cannot
+ *       trust.
  *   <li><b>Describe the original client</b> with the {@code X-Forwarded-*} set, using ordinary
  *       multi-hop semantics — see {@link #describeOriginalClient}. The gateway is no longer the
  *       outermost hop: {@code qits-platform-edge} binds the host port and forwards to this process,
@@ -47,7 +48,7 @@ import java.util.Set;
  * <p>{@code ProxyInterceptor} has no single abstract method — it is not a functional interface — so
  * this is a class rather than a lambda.
  */
-final class EdgeHeaders implements ProxyInterceptor {
+public final class EdgeHeaders implements ProxyInterceptor {
 
   /**
    * The gateway's reserved header namespace. Every header the gateway asserts about a request lives
@@ -59,19 +60,43 @@ final class EdgeHeaders implements ProxyInterceptor {
    * that is not stripped. Deliberately <b>not</b> configurable — {@code
    * qits.gateway.forwarded.strip-request-headers} may be extended, but this cannot be shrunk away.
    */
-  static final String RESERVED_PREFIX = "X-Qits-";
+  public static final String RESERVED_PREFIX = "X-Qits-";
 
   /**
    * The principal <b>name</b>, not the id — it is what an upstream writes into an audit column, and
    * the platform's existing rows hold usernames.
    */
-  static final String USER_HEADER = RESERVED_PREFIX + "User";
+  public static final String USER_HEADER = RESERVED_PREFIX + "User";
 
   /**
    * The stable subject id. Nothing reads it yet; it is asserted from the start because adding a
    * trusted header later means re-proving the strip rule, and carrying it now costs nothing.
    */
-  static final String USER_ID_HEADER = RESERVED_PREFIX + "User-Id";
+  public static final String USER_ID_HEADER = RESERVED_PREFIX + "User-Id";
+
+  /**
+   * The role set, comma-separated — safe because a role string never contains a comma (they are
+   * namespaced {@code $app:$resource:$role}).
+   *
+   * <p><b>Asserted only where the identity actually carries roles</b>, which today means the {@code
+   * edge} target and nothing else: the {@code oauth} and {@code local} targets check {@code
+   * qits.auth.required-role} here and emit no role header at all, so no service can make — or
+   * appear to make — a role decision of its own. See {@link AssertedIdentity#roles()} for where
+   * that distinction is drawn, and {@code EdgeIdentityProvider} for the parse/join rule.
+   *
+   * <p>The three names above are public because the {@code edge} target's authentication mechanism
+   * <em>reads</em> exactly the headers this class <em>writes</em> — the edge injected them one hop
+   * out. One declaration for both sides is what keeps the read and the write from drifting apart.
+   */
+  public static final String ROLES_HEADER = RESERVED_PREFIX + "Roles";
+
+  /**
+   * The {@link io.quarkus.security.identity.SecurityIdentity} attribute {@link #ROLES_HEADER} is
+   * written from. It is declared here, beside the header it feeds, so the security package depends
+   * on this class rather than the reverse — the header contract is what the identity serves, not
+   * the other way round.
+   */
+  public static final String ROLES_ATTRIBUTE = "qits.forwarded-roles";
 
   /**
    * The handshake headers a WebSocket upgrade keeps. Everything else is dropped — see {@link
@@ -239,16 +264,35 @@ final class EdgeHeaders implements ProxyInterceptor {
     }
 
     // Only now, with everything the client sent provably gone, is it safe to assert anything.
-    AssertedIdentity identity = AssertedIdentity.current();
-    if (identity != null && identity.user() != null) {
-      headers.set(USER_HEADER, identity.user());
-      if (identity.userId() != null) {
-        headers.set(USER_ID_HEADER, identity.userId());
-      }
-    }
+    assertIdentity(headers);
 
     headers.addAll(outerHops);
     describeOriginalClient(headers, inbound);
+  }
+
+  /**
+   * Write what this request authenticated as into {@code headers}, which the caller must have
+   * emptied of the reserved namespace first. An anonymous request writes nothing at all.
+   *
+   * <p><b>Called from inside both stripping methods, never from anywhere else.</b> The ordering
+   * rule is unchanged and is why this is a private helper rather than a step a caller could
+   * reorder: every call site is the line immediately after that method removed what a client sent,
+   * and this method reads nothing off the request. Sharing it is what stops the two entry points
+   * from asserting different header sets — which is exactly how {@link #ROLES_HEADER} would
+   * otherwise have reached an ordinary request and not a handshake.
+   */
+  private static void assertIdentity(MultiMap headers) {
+    AssertedIdentity identity = AssertedIdentity.current();
+    if (identity == null || identity.user() == null) {
+      return;
+    }
+    headers.set(USER_HEADER, identity.user());
+    if (identity.userId() != null) {
+      headers.set(USER_ID_HEADER, identity.userId());
+    }
+    if (identity.roles() != null) {
+      headers.set(ROLES_HEADER, identity.roles());
+    }
   }
 
   /**
@@ -320,13 +364,7 @@ final class EdgeHeaders implements ProxyInterceptor {
     }
 
     // Only now, with the namespace provably empty, is it safe to write into it.
-    AssertedIdentity identity = AssertedIdentity.current();
-    if (identity != null && identity.user() != null) {
-      request.headers().set(USER_HEADER, identity.user());
-      if (identity.userId() != null) {
-        request.headers().set(USER_ID_HEADER, identity.userId());
-      }
-    }
+    assertIdentity(request.headers());
 
     describeOriginalClient(request.headers(), inbound);
     return context.sendRequest();

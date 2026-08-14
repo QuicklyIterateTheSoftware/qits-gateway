@@ -6,7 +6,7 @@
 
     <groupId>eu.wohlben</groupId>
     <artifactId>qits-gateway</artifactId>
-    <version>2026.814.73946</version>
+    <version>2026.814.183131</version>
     <packaging>quarkus</packaging>
 
     <name>qits-gateway</name>
@@ -255,15 +255,19 @@
                             <rules>
                                 <requireProperty>
                                     <property>qits.variant</property>
-                                    <regex>oauth|local</regex>
+                                    <regex>oauth|local|edge</regex>
                                     <message>Packaging qits-gateway requires an explicit auth target:
   -Dqits.variant=oauth   OIDC login terminated at the gateway; requires QUARKUS_OIDC_* env at runtime
   -Dqits.variant=local   EXPLICITLY UNAUTHENTICATED — every request is a fixed local user. Trusted LOCAL
                          starts only (a laptop run, a test rig). NEVER internet-expose.
+  -Dqits.variant=edge    The identity is what qits-platform-edge already established, read off the
+                         inbound X-Qits-User/-User-Id/-Roles headers. Requires an edge in front that
+                         strips those headers from client traffic — see user-authentication-plan.md.
 (quarkus:dev and test default to oauth without the flag — a packaged build never defaults. The oauth
- target never degrades to `local`; only naming `local` produces an open build.)
+ target never degrades to `local` or `edge`; only naming one produces a build that authenticates no
+ one itself.)
 See migration-auth-plan.md §5.</message>
-                                    <regexMessage>Unknown qits.variant — valid values are: oauth, local.
+                                    <regexMessage>Unknown qits.variant — valid values are: oauth, local, edge.
 See migration-auth-plan.md §5.</regexMessage>
                                 </requireProperty>
                             </rules>
@@ -316,6 +320,34 @@ See migration-auth-plan.md §5.</regexMessage>
                 <property>
                     <name>qits.variant</name>
                     <value>local</value>
+                </property>
+            </activation>
+            <properties>
+                <quarkus.oidc.enabled>false</quarkus.oidc.enabled>
+            </properties>
+        </profile>
+
+        <!-- The `edge` build target: the identity is what qits-platform-edge established from the
+             browser session and injected as X-Qits-User / X-Qits-User-Id / X-Qits-Roles. This
+             gateway reads those headers and authenticates nobody itself.
+
+             It needs the same OIDC switch-off as `local`, and for the identical reason: there is no
+             auth server in this topology either — the edge terminates the session against qits-idp
+             — and quarkus-oidc treats a missing auth-server-url as fatal rather than as "not
+             needed". The @IfBuildProperty guards in security/ pick the beans; this picks the
+             extension, and only at augmentation.
+
+             NOT an open build in the sense `local` is. It trusts a header, which is sound only
+             because the edge is the single ingress and strips that header from everything a client
+             sends. A gateway built `edge` and then exposed without that edge in front of it is
+             forgeable by anyone who can reach the port — the same sentence as `local`'s warning,
+             with a different mechanism behind it. -->
+        <profile>
+            <id>variant-edge</id>
+            <activation>
+                <property>
+                    <name>qits.variant</name>
+                    <value>edge</value>
                 </property>
             </activation>
             <properties>

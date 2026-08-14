@@ -21,8 +21,12 @@ class EdgeHeadersTest {
 
   @Test
   void theHeadersTheGatewayAssertsAreReserved() {
-    assertTrue(EdgeHeaders.isReserved("X-Qits-User"));
-    assertTrue(EdgeHeaders.isReserved("X-Qits-User-Id"));
+    assertTrue(EdgeHeaders.isReserved(EdgeHeaders.USER_HEADER));
+    assertTrue(EdgeHeaders.isReserved(EdgeHeaders.USER_ID_HEADER));
+    // The edge target reads this one off the request AND asserts it downstream. Both halves depend
+    // on the strip: the read happens in the authentication mechanism, before the proxy hop, and the
+    // assertion happens after it — so a client's own X-Qits-Roles is never what a service receives.
+    assertTrue(EdgeHeaders.isReserved(EdgeHeaders.ROLES_HEADER));
   }
 
   @Test
