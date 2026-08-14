@@ -6,7 +6,7 @@
 
     <groupId>eu.wohlben</groupId>
     <artifactId>qits-gateway</artifactId>
-    <version>2026.814.183131</version>
+    <version>2026.814.193005</version>
     <packaging>quarkus</packaging>
 
     <name>qits-gateway</name>

@@ -180,9 +180,15 @@ class QitsServiceTest {
     assertTrue(QitsService.STT.navigationLabel().isEmpty());
     assertEquals(QitsService.NOT_IN_NAVIGATION, QitsService.STT.navigationPosition());
 
-    // stt is the only one left. The git host used to be here for a second reason — git is a
-    // protocol, not a page — and it now serves a page at /githost, so it has somewhere to link to.
-    assertEquals(1, unlabelled(), "stt should be the only unlabelled service");
+    // The idp joins stt: it serves pages, but pages a user is SENT to (the forward-auth redirect
+    // lands on /idp/login), not ones a menu links. A "Sign in" entry is a product decision for
+    // the day the clients/users pages are real — the constant's javadoc says so.
+    assertTrue(QitsService.IDP.navigationLabel().isEmpty());
+    assertEquals(QitsService.NOT_IN_NAVIGATION, QitsService.IDP.navigationPosition());
+
+    // The git host used to be here for a second reason — git is a protocol, not a page — and it
+    // now serves a page at /githost, so it has somewhere to link to.
+    assertEquals(2, unlabelled(), "stt and idp should be the only unlabelled services");
   }
 
   private static long unlabelled() {
