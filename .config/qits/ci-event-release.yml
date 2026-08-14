@@ -118,17 +118,23 @@ steps:
       cd -
 
       # --- half two: the image ------------------------------------------------------------------
-      # BUILDKIT, and the plugin first: node-docker-base's apk docker-cli carries no buildx, so a
-      # plain `docker build` from this image is a LEGACY build and says so only in a deprecation
-      # line. That builder's untagged cache intermediates are collectable by the containerd image
-      # store this host runs, and this build races a concurrent one of the same Dockerfile — which
-      # is how a release died on "failed to export image: No such image". ci-post-receive.yml
-      # carries the measured detail; the two preludes must stay identical.
-      docker buildx version >/dev/null 2>&1 || apk add --no-cache docker-cli-buildx
-      export DOCKER_BUILDKIT=1 BUILDX_NO_DEFAULT_ATTESTATIONS=1
-
+      # BUILDKIT, ARRANGED BY NOBODY HERE. The buildx install guard and the
+      # `export DOCKER_BUILDKIT=1 BUILDX_NO_DEFAULT_ATTESTATIONS=1` that used to stand here are
+      # retired: every step image ships buildx since qits-oci 2026.814.110556, and the launcher
+      # exports both variables fleet-wide. ci-post-receive.yml carries the measured detail of why
+      # the legacy builder had to be left at all, and the two files must stay matched.
+      #
+      # The two --secret flags hand the run's commissioned idp client
+      # ($QITS_COMMISSIONED_CLIENT_ID/$QITS_COMMISSIONED_CLIENT_SECRET, injected by the launcher) to
+      # the build as secrets rather than args — an arg is recorded in a pullable image's history.
+      # This build consumes neither: its Maven resolve is reactor-only over public repositories, so
+      # the Dockerfile mounts no secret. Inert on both counts — buildx ignores a secret no RUN
+      # mounts, and a missing env source is NOT an error (measured on buildx v0.36.1).
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-gateway:$QITS_CI_SHA"
-      docker build -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=local .
+      docker build \
+        --secret id=qits-client-id,env=QITS_COMMISSIONED_CLIENT_ID \
+        --secret id=qits-client-secret,env=QITS_COMMISSIONED_CLIENT_SECRET \
+        -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=local .
       docker push "$ref"
       # NO `docker rmi "$ref"`: on a CI host it frees nothing (the layers stay in buildkit's cache)
       # and it drops the last reference to content a concurrent build may still be resolving.
