@@ -41,30 +41,17 @@ public final class PublicPaths {
   private PublicPaths() {}
 
   /**
-   * Expects a normalized path (dot-segments collapsed) — see {@link QitsAuthPolicy} — and the
-   * request method, which exactly one entry cares about (the registry, below). Everywhere else a
-   * public path is public whole: the split-out services guard their own writes where a guard
-   * exists, and a method distinction here would just restate their filters.
+   * Expects a normalized path (dot-segments collapsed) — see {@link QitsAuthPolicy}. A public path
+   * is public whole: no entry reads the method, and the split-out services guard their own writes
+   * where a guard exists. The method stays in the signature because the policy has it and a
+   * method-scoped entry is a real possibility, not because one is here.
+   *
+   * <p>The registry's {@code /v2} was that entry, public for GET/HEAD so a docker pull through the
+   * gateway could stay anonymous. Registry reads ride the edge's registry vhost now, which is where
+   * the anonymous-read/authenticated-write split is made; through the gateway {@code /v2} is
+   * session-gated like everything else.
    */
   public static boolean isPublic(String method, String path) {
-    // The OCI registry, at the root-level /v2 the Distribution API fixes: docker and podman
-    // resolve <host>/<name>:<tag> against /v2/ and will not look anywhere else, so there is no
-    // /artifacts/… spelling of this and no way to give it one (it is an extra prefix on the
-    // artifacts entry, not a service). READ METHODS ONLY, and this is the one method-aware entry
-    // on the list:
-    //
-    //   * Pulls are anonymous by design — image names are meant to be SHARED and are guessable on
-    //     purpose, which is exactly why /v2/_catalog stays unimplemented and the posture stays
-    //     private-network rather than capability-url like the git host.
-    //   * Writes are NOT public, and this line is the registry's WHOLE external write protection:
-    //     qits-artifacts dropped its Basic-auth push guard (producers on qits-net are trusted, and
-    //     external push is unwanted entirely), so an internet docker push must die here, on a
-    //     session challenge no registry client can answer. Widening this to write methods without
-    //     restoring a guard in qits-artifacts opens push to the internet — the two move together,
-    //     and PublicPathsTest spells that out.
-    if (path.equals("/v2") || path.startsWith("/v2/")) {
-      return "GET".equals(method) || "HEAD".equals(method);
-    }
     return gatewaysOwn(path) || onAService(path);
   }
 
@@ -107,10 +94,9 @@ public final class PublicPaths {
    * rewrite, so the address below is also the address the service itself must serve — including for
    * the service-to-service calls on {@code qits-net} that never pass through here at all.
    *
-   * <p>The registry's {@code /v2} is deliberately NOT in this method: it is the one entry whose
-   * publicness depends on the request method, so it lives in {@link #isPublic} itself. Note what
-   * that entry does not make public either way: {@code /artifacts/v2} — the registry has exactly
-   * one address, and PublicPathsTest asserts the prefixed spelling stays behind the policy.
+   * <p>The registry's {@code /v2} is not here and is not anywhere else either — see {@link
+   * #isPublic}. Neither is {@code /artifacts/v2}, which was never an address: the registry has
+   * exactly one, and PublicPathsTest asserts both spellings stay behind the policy.
    */
   private static boolean onAService(String path) {
     return

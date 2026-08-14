@@ -449,17 +449,13 @@ expires:
   was on this list for the git host's post-receive hook, and left it when a push became a durable
   domain event qits-ci subscribes to. An allowlist entry that outlives its caller is an open intake
   nobody is watching;
-- **`/v2/*`** — the OCI registry, and doubly exceptional: not segment-prefixed (the client
-  hardcodes the root), and the one entry that is public for **read methods only** (`GET`/`HEAD`).
-  Pulls are anonymous by design: image names are meant to be *shared*, and are guessable on
-  purpose, which is why `/v2/_catalog` stays unimplemented and the posture stays private-network
-  rather than capability-URL the way the git host is. Writes fall back to the session policy, and
-  that refusal is the registry's **whole** external write protection: qits-artifacts carries no
-  push guard of its own (producers dial it on `qits-net`, where callers are trusted), so an
-  internet `docker push` must die here — on a challenge no registry client can answer, which is
-  the point, because external push is unwanted entirely. Widening `/v2` back to all methods
-  without restoring a guard in qits-artifacts opens push to the world; `PublicPathsTest` and
-  `GatewayAuthTest` both hold that line;
+- **`/v2/*`** — the OCI registry — used to be here, public for read methods only (`GET`/`HEAD`) so
+  an anonymous `docker pull` could resolve an image reference through the gateway. It is **not
+  public any more**, in any method. Registry traffic rides `qits-platform-edge`'s registry vhost
+  now, and that vhost is where the split is made: reads anonymous, writes on an idp Bearer token.
+  The exemption here was a second door to the same registry — an environment host reaching `/v2/…`
+  with no identity, around the vhost's policy — and no in-network consumer used it: they all dial
+  the registry by its `qits-net` name. `PublicPathsTest` and `GatewayAuthTest` hold that line;
 There used to be a third group: the monolith-relative forms (`/api/otel/*`, `/mcp/*`, …), which were
 public because the `/` catch-all's upstream served them. They went with the catch-all. Those paths
 now name no upstream, so they are neither routed nor public — `PublicPathsTest` asserts they are
