@@ -76,8 +76,9 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
                       // REPORTED_HANDSHAKE_HEADERS asserts about a WebSocket handshake, and the
                       // asymmetry IS the contract rather than a bug: a handshake rebuilds its
                       // headers from an allow-list that drops Authorization, while an ordinary
-                      // request forwards it verbatim — which is the whole of how a registry push
-                      // credential reaches qits-artifacts through this gateway.
+                      // request forwards it verbatim — which is how a service that reads a token
+                      // of its own gets to see one at all. Not the registry's push credential any
+                      // more: a registry write never reaches an upstream (RegistryWriteBlock).
                       "authorization=" + header(exchange, "Authorization"),
                       "host=" + header(exchange, "Host"),
                       "x-forwarded-for=" + header(exchange, "X-Forwarded-For"),

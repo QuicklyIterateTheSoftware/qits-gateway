@@ -139,6 +139,7 @@ SPA's two halves rather than sitting behind both:
 | Order | Route | Claims |
 | --- | --- | --- |
 | 0 | `EdgeCacheControl` | nothing — installs a headers-end hook and yields |
+| 10 | `RegistryWriteBlock` | every non-read under `/v2` — answered `403`, in both build targets |
 | 100 | `ConfigJsonRoute`, `AuthMeRoute`, `NavigationRoute` | `/api/config.json`, `/api/auth/me`, `/main-navigation` |
 | 1060 | Quinoa's generated static resources | the bundle's own files (`/`, `/index.html`, `/main-*.js`, …) |
 | 10 000 | `RouteConstants.ROUTE_ORDER_DEFAULT` | where an unordered route would land |
@@ -455,7 +456,9 @@ expires:
   now, and that vhost is where the split is made: reads anonymous, writes on an idp Bearer token.
   The exemption here was a second door to the same registry — an environment host reaching `/v2/…`
   with no identity, around the vhost's policy — and no in-network consumer used it: they all dial
-  the registry by its `qits-net` name. `PublicPathsTest` and `GatewayAuthTest` hold that line;
+  the registry by its `qits-net` name. `PublicPathsTest` and `GatewayAuthTest` hold that line.
+  A registry **write** is refused earlier and by something that is not this list at all — see
+  below;
 There used to be a third group: the monolith-relative forms (`/api/otel/*`, `/mcp/*`, …), which were
 public because the `/` catch-all's upstream served them. They went with the catch-all. Those paths
 now name no upstream, so they are neither routed nor public — `PublicPathsTest` asserts they are
@@ -475,6 +478,20 @@ Session-free is not auth-free: the git host's push token (`-o qits.token=…`) a
 are the actual authorization, exactly as they were under the old prefix. What the entry says is only
 that a caller with no browser session may reach them, which is every caller git has — a clone cannot
 answer an oauth challenge.
+
+**A registry write never leaves the gateway, and that rule is not authentication.** `POST`, `PUT`,
+`PATCH` and `DELETE` under `/v2` are answered `403` with the OCI error envelope (`DENIED`, and a
+message naming the edge's registry vhost) by `RegistryWriteBlock`, a route at order 10 — ahead of
+everything that could carry the request, and independent of the route table, so a deployment with no
+artifacts entry answers the same way. `GET`/`HEAD` are untouched.
+
+It is a **route** and not a `PublicPaths`/`QitsAuthPolicy` decision for one reason: the `local`
+target authenticates nobody, so anything expressed as authorization is a no-op there — and `local`
+is what the dev platform runs, where an anonymous blob upload through the environment host answered
+`202`. Both targets refuse identically now, and `LocalVariantTest` is where that is proven. The
+justification for refusing at all is that no legitimate writer is on this path: in-network producers
+dial qits-artifacts by its `qits-net` name, and an external push goes to the edge's registry vhost
+with an idp Bearer token. The gateway is a browser door.
 
 **The landing page is not public either, and that is the decision rather than an oversight.** `/` is
 not in `PublicPaths`, so an `oauth` gateway challenges an anonymous visitor *before* serving a byte

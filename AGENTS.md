@@ -95,6 +95,9 @@ src/main/java/eu/wohlben/qits/gateway/
   GatewayRouter.java          the catch-all Vert.x route (order 20_000 — read its ROUTE_ORDER
                               javadoc before moving it); one HttpProxy per route
   EdgeHeaders.java            the only rewrites: header hygiene + X-Forwarded-* (verbatim otherwise)
+  RegistryWriteBlock.java     a route at order 10: every non-read under /v2 is 403 in BOTH build
+                              targets — a push belongs at the edge's registry vhost, never here.
+                              Deliberately not an auth decision: `local` authenticates nobody
   RouteTableHealthCheck.java  readiness = a non-empty route table
   AssertedIdentity.java       the identity hand-off from the route handler to EdgeHeaders
   ConfigJsonRoute.java        GET /api/config.json, as a raw route (there is no REST layer)

@@ -59,6 +59,8 @@ public class GatewayRouter {
    * <table>
    *   <caption>Vert.x route orders on the main router, low to high</caption>
    *   <tr><th>Order</th><th>Handler</th><th>Where it is written</th></tr>
+   *   <tr><td>10</td><td>{@link RegistryWriteBlock}</td>
+   *       <td>this repo — a registry write is refused before anything can carry it</td></tr>
    *   <tr><td>100</td><td>{@link ConfigJsonRoute}, {@code AuthMeRoute}</td>
    *       <td>this repo — the gateway's own {@code /api} surface</td></tr>
    *   <tr><td>1060</td><td>the SPA's static assets</td>
@@ -169,6 +171,10 @@ public class GatewayRouter {
     // Order 0: before every document handler (the SPA's static assets at 1060, its fallback at
     // 40_000, the proxy above), so the headers-end hook exists whichever of them answers.
     router.route().order(0).handler(EdgeCacheControl::install);
+    // Order 10: ahead of everything that could answer, and in EVERY build target — a registry write
+    // is refused by this route rather than by the security policy, which the `local` target has no
+    // authentication to run. See RegistryWriteBlock.
+    router.route().order(RegistryWriteBlock.ROUTE_ORDER).handler(RegistryWriteBlock::refuseWrites);
     router.route().order(ROUTE_ORDER).handler(this::handle);
   }
 

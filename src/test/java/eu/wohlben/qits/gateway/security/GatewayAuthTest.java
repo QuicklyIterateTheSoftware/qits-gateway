@@ -80,9 +80,11 @@ class GatewayAuthTest {
   @Test
   void aPushIsRefusedAtTheGatewayAndNeverReachesTheRegistry() {
     // A write was refused here even while reads were public, and nothing about it changes: /v2 is
-    // behind the session policy whole now, so a push dies on a challenge no registry client can
-    // answer. The body must not carry the stub upstream's echo: the request has to die here, not
-    // there.
+    // behind the session policy whole now, so an anonymous push dies on a challenge no registry
+    // client can answer, at the security layer — ahead of every route. A push that DOES carry an
+    // identity is refused one route later and in every build target; that is RegistryWriteBlock,
+    // asserted in GatewayRoutingTest and LocalVariantTest. The body must not carry the stub
+    // upstream's echo: the request has to die here, not there.
     given()
         .redirects()
         .follow(false)

@@ -86,6 +86,36 @@ class LocalVariantTest {
   }
 
   @Test
+  void aRegistryWriteIsRefusedEvenHere() {
+    // THE case this rule exists for. The dev platform runs this target, so every /v2 write arrived
+    // as the fixed local user and was proxied: an anonymous blob upload through the environment
+    // host answered 202. A refusal that lives in the security policy cannot help a target whose
+    // whole point is that it authenticates nobody, so RegistryWriteBlock is a route instead and
+    // both targets refuse identically. The body must not carry the stub upstream's echo.
+    given()
+        .body(new byte[] {1, 2, 3})
+        .when()
+        .post("/v2/qits/plausibility/blobs/uploads/")
+        .then()
+        .statusCode(403)
+        .contentType(containsString("application/json"))
+        .body(containsString("DENIED"))
+        .body(containsString("edge registry vhost"))
+        .body(not(containsString("body-bytes")));
+  }
+
+  @Test
+  void aRegistryReadStillRoutesHere() {
+    // The other half, in this target too: nothing about the refusal touches a pull.
+    given()
+        .when()
+        .get("/v2/qits/alpine/manifests/latest")
+        .then()
+        .statusCode(200)
+        .body(containsString("path=/v2/qits/alpine/manifests/latest"));
+  }
+
+  @Test
   void authMeReportsTheOpenTarget() {
     // The SPA renders no sign-out link for this target — there is no session to end.
     given()

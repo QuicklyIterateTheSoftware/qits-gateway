@@ -89,16 +89,41 @@ class GatewayRoutingTest {
   }
 
   @Test
+  void aRegistryWriteIsRefusedHereEvenForANamedCaller() {
+    // Not an authentication decision, which is why it is asserted next to the routing: /v2 has a
+    // real route and this caller has a real identity, and the write is still answered here. No
+    // legitimate writer pushes through the gateway — producers dial qits-artifacts on qits-net, an
+    // external push goes to the edge's registry vhost with a Bearer — so the gateway refuses in
+    // every build target. LocalVariantTest holds the target that has no identity at all.
+    given()
+        .body(new byte[] {1, 2, 3})
+        .when()
+        .post("/v2/qits/alpine/blobs/uploads/")
+        .then()
+        .statusCode(403)
+        .contentType(containsString("application/json"))
+        .body(containsString("DENIED"))
+        .body(containsString("edge registry vhost"))
+        // It died here: the stub upstream never saw it.
+        .body(not(containsString("body-bytes")));
+  }
+
+  @Test
   void aBodyLargerThanTheQuarkusDefaultWireLimitStreamsThrough() {
     // The gateway analogue of the artifacts suite's oversized-upload test, and the only automated
     // guard against quarkus.http.limits.max-body-size being lowered back below what a layer needs.
-    // A push through here would otherwise 413 at the front door, bodiless, before the registry
-    // could answer with the spec's error envelope.
+    // A large upload through here would otherwise 413 at the front door, bodiless, before the
+    // service could answer with its own error envelope.
+    //
+    // It used to be a registry blob upload, which is the exchange that first needed the limit
+    // raised. That path is refused at the front door now (see the test above), so the same body
+    // rides the blob store's own write address instead — the limit is the gateway's and is not per
+    // route.
     byte[] body = new byte[12 * 1024 * 1024];
     given()
         .body(body)
         .when()
-        .post("/v2/qits/alpine/blobs/uploads/x")
+        .post("/artifacts/api/repositories/ci-screenshots/blobs")
         .then()
         .statusCode(200)
         .body(containsString("body-bytes=" + body.length));
