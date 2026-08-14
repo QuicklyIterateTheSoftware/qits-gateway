@@ -56,8 +56,8 @@ RUN ./mvnw --version
 # build output that would also risk shadowing what this stage compiles.
 COPY . .
 
-# oauth | local — see the header. No ENV default: an unset value fails the enforcer rather than
-# silently picking a target.
+# oauth | local | edge — see the header. No ENV default: an unset value fails the enforcer rather
+# than silently picking a target.
 ARG QITS_VARIANT
 # -Dnative flips quarkus.native.enabled (this project carries its own `native` profile). Cap
 # native-image RAM so the build is deterministic on small machines.

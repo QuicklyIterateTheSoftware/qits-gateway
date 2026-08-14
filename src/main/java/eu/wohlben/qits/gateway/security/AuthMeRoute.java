@@ -27,10 +27,10 @@ import java.util.List;
  * <p><b>Why the target is read off the bean set rather than a config key.</b> {@code
  * qits.auth.variant} selects the build, but as a <em>runtime</em> config property it is overridable
  * by any environment variable — and a deployment that answered "local" while running an {@code
- * oauth} build, or the reverse, would be lying to the SPA about whether a login exists. The
- * presence of {@link LocalAuthMechanism} is decided at augmentation and cannot be moved afterwards,
- * so asking the container which mechanism was actually built in gives an answer that cannot drift
- * from the build.
+ * oauth} build, or the reverse, would be lying to the SPA about whether a login exists. Which
+ * mechanism bean exists — {@link LocalAuthMechanism}, {@link EdgeAuthMechanism} or neither, which
+ * is {@code oauth} — is decided at augmentation and cannot be moved afterwards, so asking the
+ * container what was actually built in gives an answer that cannot drift from the build.
  */
 @ApplicationScoped
 public class AuthMeRoute {
@@ -47,6 +47,9 @@ public class AuthMeRoute {
    */
   @Inject @All List<LocalAuthMechanism> localMechanism;
 
+  /** The same introspection for the {@code edge} target. The two lists are never both non-empty. */
+  @Inject @All List<EdgeAuthMechanism> edgeMechanism;
+
   void register(@Observes Router router) {
     router.get(PATH).order(ROUTE_ORDER).handler(this::handle);
   }
@@ -61,7 +64,13 @@ public class AuthMeRoute {
   }
 
   private String variant() {
-    return localMechanism.isEmpty() ? "oauth" : "local";
+    if (!localMechanism.isEmpty()) {
+      return "local";
+    }
+    // `edge` answers from the same header-derived identity username() reads below, so the SPA's
+    // user chip works unchanged. It renders no sign-out link for this target either: the session is
+    // the edge's, and ending it is an idp call the edge's login pages own, not this process'.
+    return edgeMechanism.isEmpty() ? "oauth" : "edge";
   }
 
   private String username(RoutingContext context) {

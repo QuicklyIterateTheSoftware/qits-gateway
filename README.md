@@ -407,9 +407,12 @@ exchanges pass through here).
   selects a host, a port or a file path, and `RouteTable` still resolves upstreams from
   configuration alone. What the SPA changed is which *unclaimed* paths get a 200 instead of a 404 —
   a question about this process' own output, not about where bytes are sent.
-- **The gateway is the only thing that authenticates.** It performs the login, decides authorization
-  (`qits.auth.required-role`), and asserts the resulting identity downstream as `X-Qits-User` /
-  `X-Qits-User-Id`. Every other component consumes that header and authenticates nothing — see
+- **The gateway is where the identity is established for everything behind it.** It decides
+  authorization (`qits.auth.required-role`) and asserts the resulting identity downstream as
+  `X-Qits-User` / `X-Qits-User-Id` (plus `X-Qits-Roles` in the `edge` target). Every other component
+  consumes those headers and authenticates nothing. *Performing* the login is the `oauth` target's;
+  in `edge` the session was terminated one hop out at `qits-platform-edge` and this process reads its
+  result — the downstream contract is identical either way. See
   [Authentication](#authentication).
 - **This is a perimeter against the internet, not a boundary on `qits-net`.** Every service sits
   unpublished on the shared network, and so does every workspace container running a coding agent
@@ -428,10 +431,19 @@ copies of the problem share a jar without making the problem smaller.)
 | --- | --- | --- |
 | `X-Qits-User` | the principal **name** (`preferred_username`) | `SecurityIdentity.getPrincipal().getName()` |
 | `X-Qits-User-Id` | the stable subject id | an identity attribute; nothing reads it yet |
+| `X-Qits-Roles` | the role set, comma-separated — **`edge` target only** | nothing reads it yet |
 
 The principal is the name and not the id because upstreams write it into audit columns whose existing
-rows hold usernames. **No groups header is emitted**: the one role check the system has happens here,
-so no service can make — or appear to make — a role decision of its own.
+rows hold usernames. **The `oauth` and `local` targets emit no role header**: the one role check the
+system has happens here, so no service can make — or appear to make — a role decision of its own.
+
+The `edge` target is the exception, and a narrow one. It did not mint those roles — the edge handed
+them over from the session it validated — so withholding them would be this process deciding what a
+service may know about a user it was told about. The role check still happens here and still nothing
+downstream enforces one; `X-Qits-Roles` is a fact forwarded, not an authorization moved. Roles are
+comma-separated because a role string never contains a comma (they are namespaced
+`$app:$resource:$role`), blank entries are dropped, and the header is **absent** rather than empty
+when the identity carries no roles.
 
 Authorization is a single global check. `PublicPaths` is the token-free allowlist for callers that
 hold no user token by construction (workspace containers doing git/OTLP/MCP, health probes,
@@ -488,7 +500,9 @@ artifacts entry answers the same way. `GET`/`HEAD` are untouched.
 It is a **route** and not a `PublicPaths`/`QitsAuthPolicy` decision for one reason: the `local`
 target authenticates nobody, so anything expressed as authorization is a no-op there — and `local`
 is what the dev platform runs, where an anonymous blob upload through the environment host answered
-`202`. Both targets refuse identically now, and `LocalVariantTest` is where that is proven. The
+`202`. The same holds for `edge`, which permits an anonymous request by design, so a push carrying
+no headers would sail past a policy-shaped refusal too. Every target refuses identically now;
+`LocalVariantTest` and `EdgeVariantTest` are where that is proven. The
 justification for refusing at all is that no legitimate writer is on this path: in-network producers
 dial qits-artifacts by its `qits-net` name, and an external push goes to the edge's registry vhost
 with an idp Bearer token. The gateway is a browser door.
@@ -499,7 +513,8 @@ of the SPA: the front door asks who you are and the landing page is what you see
 also means the bundle's own assets (`/main-*.js`, `/styles-*.css`) sit behind the session, which is
 the same posture and needs no separate rule — they are fetched by a browser that has just completed
 the code flow. A `local` gateway has no challenge to make and serves the page openly, like
-everything else in that target. If a deployment ever wants an anonymous landing page, that is one
+everything else in that target; an `edge` gateway serves it to an anonymous visitor too, because the
+edge is what decides whether an anonymous browser gets this far at all. If a deployment ever wants an anonymous landing page, that is one
 entry in `PublicPaths.gatewaysOwn` plus the asset prefixes, taken deliberately.
 
 A **service's** `/q/*` is deliberately not public. Each service's non-application root has moved
@@ -517,6 +532,7 @@ so the target is a **build** property, never a runtime config key:
 ```bash
 ./mvnw package -Dqits.variant=oauth   # OIDC login; needs QUARKUS_OIDC_* at runtime
 ./mvnw package -Dqits.variant=local   # EXPLICITLY UNAUTHENTICATED — never internet-expose
+./mvnw package -Dqits.variant=edge    # the identity is the edge's; needs an edge in front
 ```
 
 `quarkus:dev` and `test` default to `oauth` flagless; packaging without the flag is refused. The
@@ -527,12 +543,35 @@ properties file can open a production gateway** — setting `QITS_AUTH_VARIANT=l
 A `local` gateway synthesizes a fixed identity and emits the same `X-Qits-*` headers, so everything
 downstream is byte-identical between targets: test and production differ in exactly one component.
 
+**The `edge` target authenticates nothing itself: it reads the identity off the request.**
+`qits-platform-edge` validates the browser session against qits-idp and injects `X-Qits-User`,
+`X-Qits-User-Id` and `X-Qits-Roles`; `EdgeAuthMechanism` turns those three into the `SecurityIdentity`
+and `EdgeHeaders` asserts them onward, so the strip-then-inject order and everything downstream are
+unchanged — only the *source* of the value moves. Two consequences, both deliberate:
+
+- **No headers means anonymous, and anonymous is permitted.** A headerless request is the edge's
+  session gate switched off (the rollout flag) or an internal dial on `qits-net` that never crossed
+  the edge; the edge is what refuses unauthenticated browser traffic, and challenging here would take
+  the platform down instead of protecting it. `qits.auth.required-role` still applies to every
+  request that *does* carry an identity.
+- **Trusting the header is sound only behind the edge.** The edge is the single ingress and strips
+  the whole `X-Qits-*` prefix off client traffic before it decides anything, and anything else that
+  can reach this port is already on `qits-net`, where it can dial any service directly and assert
+  what it likes. Published without that edge in front of it, an `edge` gateway is forgeable by
+  anyone who can reach the port — the same warning `local` carries, with a different mechanism
+  behind it.
+
+The order the platform adopts these in is not free: the edge has to be injecting headers *before*
+the gateway is flipped to `edge`, or every request becomes anonymous at once. Flipping the edge
+first is safe, because `local` ignores the new headers. See `user-authentication-plan.md`.
+
 ### Native image cost
 
 `quarkus-oidc` is the largest extension this repo has taken on, and it stays on the classpath in both
 targets — a single-module build cannot conditionally drop a compile dependency, so `@IfBuildProperty`
-conditions the beans rather than the jar. The extension itself *is* switched off in the `local`
-target, which is what lets that build start with no IdP configured; what it cannot shed is the jar.
+conditions the beans rather than the jar. The extension itself *is* switched off in the `local` and
+`edge` targets, which is what lets those builds start with no IdP configured; what they cannot shed
+is the jar.
 
 Measured with `-Dquarkus.native.container-build=true` (same machine, same day) — pinned to the
 container builder so the three rows share one native-image version, not because a container is
@@ -546,7 +585,8 @@ needed to build:
 
 Native generation time barely moved: 26.6 s → 27.6 s. The `local` row is the price of not being able
 to drop a compile dependency in a single-module build; the gap between the two targets is what OIDC
-actually costs when it is switched on.
+actually costs when it is switched on. `edge` is unmeasured and belongs on the `local` row: it
+switches the same extension off and adds three small beans of its own.
 
 Judged acceptable: ~12% on a binary that exists to start in ~50 ms, in exchange for deleting the auth
 question from six other repositories. If it ever stops being acceptable, the escape hatch works

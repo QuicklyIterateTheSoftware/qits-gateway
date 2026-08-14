@@ -29,10 +29,12 @@ final class AssertedIdentity {
 
   private final String user;
   private final String userId;
+  private final String roles;
 
-  private AssertedIdentity(String user, String userId) {
+  private AssertedIdentity(String user, String userId, String roles) {
     this.user = user;
     this.userId = userId;
+    this.roles = roles;
   }
 
   /** The principal name, or {@code null} for an anonymous request. */
@@ -46,6 +48,14 @@ final class AssertedIdentity {
   }
 
   /**
+   * The comma-separated role set to forward, or {@code null} when this build has none to forward —
+   * which is every target but {@code edge}. See {@link #roles(SecurityIdentity)}.
+   */
+  String roles() {
+    return roles;
+  }
+
+  /**
    * Record what this request authenticated as, for the interceptor to assert upstream. Anonymous
    * identities are stored as an absent user rather than skipped, so the interceptor never has to
    * distinguish "no identity" from "never ran".
@@ -56,11 +66,12 @@ final class AssertedIdentity {
       return;
     }
     if (identity == null || identity.isAnonymous() || identity.getPrincipal() == null) {
-      context.putLocal(CONTEXT_KEY, new AssertedIdentity(null, null));
+      context.putLocal(CONTEXT_KEY, new AssertedIdentity(null, null, null));
       return;
     }
     context.putLocal(
-        CONTEXT_KEY, new AssertedIdentity(identity.getPrincipal().getName(), userId(identity)));
+        CONTEXT_KEY,
+        new AssertedIdentity(identity.getPrincipal().getName(), userId(identity), roles(identity)));
   }
 
   /** What this request authenticated as, or {@code null} if nothing recorded one. */
@@ -81,5 +92,21 @@ final class AssertedIdentity {
     }
     Object subject = identity.getAttribute("sub");
     return subject == null ? null : subject.toString();
+  }
+
+  /**
+   * The role set to forward, read from the {@link EdgeHeaders#ROLES_ATTRIBUTE} attribute rather
+   * than from {@code getRoles()}.
+   *
+   * <p>That is the whole of the "which target forwards roles" decision, and it is deliberately not
+   * a variant check. Only the {@code edge} target's identity provider sets the attribute, because
+   * only that target has roles that came from somewhere a service could act on. The {@code oauth}
+   * and {@code local} targets keep the older rule — the one role check the system has is {@code
+   * qits.auth.required-role}, made in {@code QitsAuthPolicy} and never repeated downstream — and
+   * they keep it without this class knowing which build it is in.
+   */
+  private static String roles(SecurityIdentity identity) {
+    Object roles = identity.getAttribute(EdgeHeaders.ROLES_ATTRIBUTE);
+    return roles == null ? null : roles.toString();
   }
 }

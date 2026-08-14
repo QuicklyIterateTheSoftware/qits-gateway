@@ -86,7 +86,10 @@ public class StubUpstream implements QuarkusTestResourceLifecycleManager {
                       "x-forwarded-proto=" + header(exchange, "X-Forwarded-Proto"),
                       "remote-user=" + header(exchange, "Remote-User"),
                       "x-qits-user=" + header(exchange, "X-Qits-User"),
-                      "x-qits-user-id=" + header(exchange, "X-Qits-User-Id"))
+                      "x-qits-user-id=" + header(exchange, "X-Qits-User-Id"),
+                      // Only the edge target asserts this one, so `-` here is the assertion the
+                      // oauth and local suites make: roles stop at the gateway in those targets.
+                      "x-qits-roles=" + header(exchange, "X-Qits-Roles"))
                   + "\n";
           byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
           exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
