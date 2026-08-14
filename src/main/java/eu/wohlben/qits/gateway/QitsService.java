@@ -119,7 +119,18 @@ public enum QitsService {
    * dockerd registry-mirrors, the maven repository list) is a separate work package that has not
    * started. Until it does, this entry routes the segment and nothing else.
    */
-  MIRROR("Mirror", 10);
+  MIRROR("Mirror", 10),
+
+  /**
+   * qits-platform-idp — the identity provider, and <b>deliberately unlabelled</b> like {@link
+   * #STT}: its browser surface is {@code /idp/login} and {@code /idp/register}, pages a user is
+   * <em>sent to</em> (by the edge's forward-auth redirect) rather than ones anyone browses to from
+   * a menu, and a "Sign in" navigation entry is a product decision for the day the clients/users
+   * pages are real. Routing it here is what puts those pages in front of a browser at all — machine
+   * callers (token minting, JWKS, introspection) keep dialling {@code qits-platform-idp} on
+   * qits-net and never pass here.
+   */
+  IDP;
 
   /**
    * The {@link #navigationPosition()} of a service that is not in the navigation. Never compared
