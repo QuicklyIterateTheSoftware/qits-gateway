@@ -35,10 +35,11 @@
 # platform's npm registry — a RUN inside a docker build cannot, by any address. The Dockerfile's
 # builder stage only packages the bundle this half produced.
 #
-# QITS_VARIANT=local, THE SAME AS THE PUSH PIPELINE: this publishes the UNAUTHENTICATED gateway on
-# purpose, for a workstation's own platform. A deployment fronting more than one machine builds the
-# oauth variant and must not consume this image — and a *version*-tagged image is the more inviting
-# thing to consume by mistake, which is the one reason this note is louder here than there.
+# QITS_VARIANT=edge, THE SAME AS THE PUSH PIPELINE: this publishes the gateway that trusts the
+# platform edge's X-Qits-* identity headers. It must only ever sit behind an edge with sessions
+# on — the edge terminates authentication and re-issues the headers — and a *version*-tagged
+# image is the more inviting thing to consume by mistake, which is the one reason this note is
+# louder here than there.
 #
 # THIS FILE IS INERT UNTIL qits-workspaces PUBLISHES SCMRelease, and it lands first on purpose: the
 # bus is at-most-once with no catch-up and no replay, so a trigger file must be in place before the

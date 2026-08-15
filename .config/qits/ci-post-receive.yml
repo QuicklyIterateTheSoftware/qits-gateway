@@ -18,10 +18,12 @@
 # CLI; the build and the push happen in the host's daemon through the socket this step declares
 # (docker: true). A failed push is a failed step is a FAILED run.
 #
-# QITS_VARIANT=local: this pipeline publishes the UNAUTHENTICATED gateway, on purpose — the
-# platform this flow feeds is a workstation's own, its registry local, its port loopback-bound,
-# and every request already arrives as the one trusted user. A deployment that fronts anything
-# beyond one machine builds the oauth variant instead and must not consume this image.
+# QITS_VARIANT=edge: this pipeline publishes the gateway that TRUSTS the platform edge's
+# X-Qits-* identity headers. The edge terminates authentication (sessions on, anonymous
+# browsers redirected to /idp/login) and re-issues the headers on every request, so this
+# image must only ever sit behind that edge. The order of the 2026-08-15 flip is load-bearing:
+# edge sessions went on FIRST — an edge-variant gateway behind a sessions-off edge reads no
+# headers and 401s the whole platform.
 steps:
   - image: qits/build-images/node-docker-base:latest
     docker: true
@@ -129,13 +131,13 @@ steps:
       # twice over: buildx ignores a secret no RUN mounts, and a missing env source is NOT an error
       # (measured on buildx v0.36.1, the build runs green with the variable unset).
       #
-      # `--build-arg QITS_VARIANT=local` is not a secret and stays an arg: it is the auth target this
+      # `--build-arg QITS_VARIANT=edge` is not a secret and stays an arg: it is the auth target this
       # image ships with, and it is meant to be readable in the history.
       ref="$QITS_REGISTRY/$QITS_IMAGE_REPOSITORY/qits-gateway:$QITS_CI_SHA"
       docker build \
         --secret id=qits-client-id,env=QITS_COMMISSIONED_CLIENT_ID \
         --secret id=qits-client-secret,env=QITS_COMMISSIONED_CLIENT_SECRET \
-        -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=local .
+        -t "$ref" -f docker/Dockerfile --build-arg QITS_VARIANT=edge .
       docker push "$ref"
       # NO `docker rmi "$ref"` any more: it freed nothing a CI host wants back — the layers stay in
       # buildkit's cache either way — while under the containerd image store it drops the last
