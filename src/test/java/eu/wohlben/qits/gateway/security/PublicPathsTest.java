@@ -75,13 +75,13 @@ class PublicPathsTest {
   class OnAService {
 
     @Test
-    void theGitProtocolSubtreeIsPublic() {
+    void theGitProtocolSubtreeRequiresAuthentication() {
       // Smart-HTTP, both address schemes qits-githost serves.
-      assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
-      assertTrue(PublicPaths.isPublic("GET", "/git/proj-1/repo/git-receive-pack"));
+      assertFalse(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
+      assertFalse(PublicPaths.isPublic("GET", "/git/proj-1/repo/git-receive-pack"));
       // The content reads qits-ci makes instead of cloning — the same subtree, deliberately.
-      assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/blob/main/.config/qits/pipeline.yml"));
-      assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/tree/main"));
+      assertFalse(PublicPaths.isPublic("GET", "/git/abc-123/blob/main/.config/qits/pipeline.yml"));
+      assertFalse(PublicPaths.isPublic("GET", "/git/abc-123/tree/main"));
 
       assertFalse(PublicPaths.isPublic("GET", "/git")); // only the subtree, not the bare listing
       assertFalse(PublicPaths.isPublic("GET", "/gitignore")); // prefix must not bleed
@@ -101,11 +101,9 @@ class PublicPathsTest {
     }
 
     @Test
-    void theMirrorIsNotPublic() {
-      // qits-platform-mirror is routed and navigable, and nothing of it is token-free: its
-      // protocol clients reach it on qits-net, not through the front door.
-      assertFalse(PublicPaths.isPublic("GET", "/mirror"));
-      assertFalse(PublicPaths.isPublic("GET", "/mirror/q/health/ready"));
+    void theMirrorIsPublic() {
+      assertTrue(PublicPaths.isPublic("GET", "/mirror"));
+      assertTrue(PublicPaths.isPublic("GET", "/mirror/q/health/ready"));
     }
 
     @Test
@@ -142,12 +140,12 @@ class PublicPathsTest {
     }
 
     @Test
-    void theBlobStoreIsPublicUnderTheArtifactsSegment() {
+    void theBlobStoreRequiresAuthentication() {
       // Token-free at the session-policy layer — CI uploaders hold no session; writes are guarded
       // by the static-token filter in the service, reads must work as a plain <img> src.
-      assertTrue(PublicPaths.isPublic("GET", "/artifacts/api"));
-      assertTrue(PublicPaths.isPublic("GET", "/artifacts/api/repositories/ci-screenshots/blobs"));
-      assertTrue(
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/api"));
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/api/repositories/ci-screenshots/blobs"));
+      assertFalse(
           PublicPaths.isPublic(
               "GET",
               "/artifacts/api/repositories/ci-screenshots/blobs/"
@@ -186,21 +184,21 @@ class PublicPathsTest {
     }
 
     @Test
-    void otlpIngestIsPublicUnderTheObservabilitySegment() {
-      assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/traces"));
-      assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/logs"));
-      assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/metrics"));
+    void otlpIngestRequiresAuthentication() {
+      assertFalse(PublicPaths.isPublic("GET", "/observability/api/otel/v1/traces"));
+      assertFalse(PublicPaths.isPublic("GET", "/observability/api/otel/v1/logs"));
+      assertFalse(PublicPaths.isPublic("GET", "/observability/api/otel/v1/metrics"));
       // Telemetry READS sit under the same rest path and are not public.
       assertFalse(PublicPaths.isPublic("GET", "/observability/api/telemetry/logs"));
       assertFalse(PublicPaths.isPublic("GET", "/observability/api/otel")); // subtree only
     }
 
     @Test
-    void eachMcpServerIsPublicAtExactlyItsOwnPath() {
+    void eachMcpServerRequiresAuthentication() {
       // One path per service, not the old /mcp/<server> family: observability's server was renamed
       // off `repository`, which is what collapsed the family and let the allowlist tighten.
-      assertTrue(PublicPaths.isPublic("GET", "/observability/mcp"));
-      assertTrue(PublicPaths.isPublic("GET", "/projects/mcp"));
+      assertFalse(PublicPaths.isPublic("GET", "/observability/mcp"));
+      assertFalse(PublicPaths.isPublic("GET", "/projects/mcp"));
       // Deliberately NOT the subtree. quarkus-mcp-server-http mounts the legacy SSE transport at
       // <root>/sse; the daemon dials these with streamable HTTP (the root itself), so nothing we
       // ship needs it. If an SSE-transport client ever appears, this assertion is where it lands.
@@ -210,14 +208,14 @@ class PublicPathsTest {
     }
 
     @Test
-    void theDaemonControlSocketIsPublicUnderTheWorkspacesSegment() {
-      assertTrue(PublicPaths.isPublic("GET", "/workspaces/daemon/42"));
+    void theDaemonControlSocketRequiresAuthentication() {
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/daemon/42"));
       assertFalse(PublicPaths.isPublic("GET", "/workspaces/daemon")); // only the subtree
     }
 
     @Test
-    void captureIsPublicExactlyNotAsPrefix() {
-      assertTrue(PublicPaths.isPublic("GET", "/workspaces/api/capture"));
+    void captureRequiresAuthentication() {
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/api/capture"));
       assertFalse(PublicPaths.isPublic("GET", "/workspaces/api/captures"));
       assertFalse(PublicPaths.isPublic("GET", "/workspaces/api/capture/extra"));
     }
@@ -264,18 +262,18 @@ class PublicPathsTest {
       assertFalse(PublicPaths.isPublic("GET", "/api/ci/events/post-receive"));
     }
 
-    /** The segment-prefixed forms are the live ones, and stay public. */
+    /** The live machine-facing forms require a client identity. */
     @Test
-    void theSegmentPrefixedFormsStillAre() {
+    void theSegmentPrefixedFormsAreProtected() {
       // /git is the exception to the heading: an extra prefix rather than a segment, kept because
       // a clone url cannot be told a new address.
-      assertTrue(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
-      assertTrue(PublicPaths.isPublic("GET", "/artifacts/api/repositories/ci-screenshots/blobs"));
-      assertTrue(PublicPaths.isPublic("GET", "/observability/api/otel/v1/traces"));
-      assertTrue(PublicPaths.isPublic("GET", "/observability/mcp"));
-      assertTrue(PublicPaths.isPublic("GET", "/projects/mcp"));
-      assertTrue(PublicPaths.isPublic("GET", "/workspaces/daemon/w1"));
-      assertTrue(PublicPaths.isPublic("GET", "/workspaces/api/capture"));
+      assertFalse(PublicPaths.isPublic("GET", "/git/abc-123/info/refs"));
+      assertFalse(PublicPaths.isPublic("GET", "/artifacts/api/repositories/ci-screenshots/blobs"));
+      assertFalse(PublicPaths.isPublic("GET", "/observability/api/otel/v1/traces"));
+      assertFalse(PublicPaths.isPublic("GET", "/observability/mcp"));
+      assertFalse(PublicPaths.isPublic("GET", "/projects/mcp"));
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/daemon/w1"));
+      assertFalse(PublicPaths.isPublic("GET", "/workspaces/api/capture"));
       // qits-ci's is deliberately absent: the segment-prefixed spelling was public too and is not
       // any more, because its one token-free caller became a bus subscription. See
       // nothingOfCiIsPublic.

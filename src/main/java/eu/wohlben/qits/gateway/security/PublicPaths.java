@@ -1,178 +1,33 @@
 package eu.wohlben.qits.gateway.security;
 
-/**
- * The token-free surface: paths whose callers cannot hold a user token — workspace containers (git
- * clone/push, OTLP export, MCP), the cross-origin fixture SPA's capture POST, health probes — plus
- * the gateway's own {@code /api/auth/*}, {@code /api/config.json} and {@code /main-navigation},
- * which anonymous browsers have to be able to fetch before there is a session to speak of.
- *
- * <p>Moved here from the monolith, and the reason it survives the move is worth stating:
- * "authentication moves to the edge" reads like it subsumes this list, and it does not. Workspace
- * containers reach their targets directly on {@code qits-net}; wherever the gateway <em>is</em> in
- * their path, it must not demand an identity they have no way to hold.
- *
- * <h2>Two groups, and why they are separate methods</h2>
- *
- * <ul>
- *   <li>{@link #gatewaysOwn} — served by this process.
- *   <li>{@link #onAService} — served by a split-out service, almost always under its own {@code
- *       /<segment>/…} prefix. The one exception is a protocol root a client hardcodes; see there.
- * </ul>
- *
- * <p>There was a third, {@code onTheMonolith}: the monolith-relative spellings ({@code /api/otel/},
- * {@code /mcp/}) that the {@code /} catch-all carried. It is gone with the catch-all itself. qits
- * is deployed clean — these services and nothing else, no monolith beside them and no shared access
- * — so those paths name an upstream that does not exist, and the gateway now 404s them rather than
- * allowing them through to nothing.
- *
- * <p>{@code /git/} was in that group and is the one spelling that came back, which is worth being
- * precise about: it is not the monolith's path returning, it is the address git clients hardcode,
- * routed to qits-githost as an extra prefix beside that service's {@code /githost} segment. The git
- * host left qits-artifacts in the byte-plane split, so {@code /artifacts/git/} is the spelling that
- * died and {@code /git/} has a real route with a real upstream behind it.
- *
- * <p>The grouping survives because it still says something: a path is public either because this
- * process serves it to a caller with no session yet, or because a service serves it to a caller
- * that cannot hold a token at all. Adding an entry means deciding which, and that is the question
- * worth being forced to answer.
- */
+/** The small, explicit surface which callers may reach without an authenticated identity. */
 public final class PublicPaths {
 
   private PublicPaths() {}
 
-  /**
-   * Expects a normalized path (dot-segments collapsed) — see {@link QitsAuthPolicy}. A public path
-   * is public whole: no entry reads the method, and the split-out services guard their own writes
-   * where a guard exists. The method stays in the signature because the policy has it and a
-   * method-scoped entry is a real possibility, not because one is here.
-   *
-   * <p>The registry's {@code /v2} was that entry, public for GET/HEAD so a docker pull through the
-   * gateway could stay anonymous. Registry reads ride the edge's registry vhost now, which is where
-   * the anonymous-read/authenticated-write split is made; through the gateway {@code /v2} is
-   * session-gated like everything else.
-   */
+  /** Expects a normalized path; see {@link QitsAuthPolicy}. */
   public static boolean isPublic(String method, String path) {
-    return gatewaysOwn(path) || onAService(path);
+    return gatewaysOwn(path) || mirror(path);
   }
 
   /**
-   * Paths this process serves itself. Every one is fetched by a browser that has no session yet, or
-   * by an orchestrator that has no browser.
+   * Gateway endpoints needed before a browser session exists, plus the gateway's orchestrator
+   * health surface. A service's own management endpoints do not inherit this exception.
    */
   private static boolean gatewaysOwn(String path) {
-    // The GATEWAY's health surface, and only the gateway's. It is the single published listener of
-    // a deployment, so a compose healthcheck or an orchestrator probe has no other address for it
-    // and cannot hold a token.
-    //
-    // A SERVICE's /q/* is deliberately NOT here, even though each service's non-application root
-    // has just moved under its segment (/observability/q/openapi, /ci/q/health, …). Nothing that
-    // must reach those traverses the gateway: every service sits on qits-net and its container
-    // healthcheck dials it directly by DNS name. What is left of a service's /q/* at the front door
-    // is swagger-ui and the OpenAPI document — read by humans, who have a session — plus a health
-    // endpoint whose body is deployment detail (the gateway's own readiness response literally *is*
-    // its route table). Anonymous internet access to that is a leak with no caller asking for it.
     return path.equals("/q")
         || path.startsWith("/q/")
-        // GET /api/auth/me + the oauth variant's logout path, which quarkus-oidc intercepts inside
-        // the authentication mechanism. A browser with no session must be able to ask who it is.
         || path.startsWith("/api/auth/")
-        // The web components' pre-bootstrap config fetch (@qits/angular reads the base-relative
-        // `api/config.json` before the app exists). Served here by ConfigJsonRoute — it has no
-        // segment because the gateway has none.
         || path.equals("/api/config.json")
-        // The platform's left navigation (NavigationRoute), for the same reason as the line above
-        // and in the same group: this process serves it, and it is fetched by a browser that has no
-        // session yet — the chrome renders before there is anything to authenticate. What it
-        // discloses is which segments this gateway routes, which is what the menu IS; a deployment
-        // that needs its topology secret does not have one it can publish a menu of.
         || path.equals("/main-navigation");
   }
 
   /**
-   * Paths a split-out service serves. Almost all are the <b>segment-prefixed</b> forms, per {@code
-   * migration-path-conventions.md}, and each reaches its service verbatim: the gateway does not
-   * rewrite, so the address below is also the address the service itself must serve — including for
-   * the service-to-service calls on {@code qits-net} that never pass through here at all.
-   *
-   * <p>The registry's {@code /v2} is not here and is not anywhere else either — see {@link
-   * #isPublic}. Neither is {@code /artifacts/v2}, which was never an address: the registry has
-   * exactly one, and PublicPathsTest asserts both spellings stay behind the policy.
+   * The mirror is the sole anonymous service. Machine protocols use commissioned OIDC clients and
+   * their system roles; they must not acquire a gateway exemption merely because they lack a user
+   * session.
    */
-  private static boolean onAService(String path) {
-    return
-    // qits-githost: container clone/push, and qits-ci's own fetches. One subtree covers both,
-    // because both are addressed under a repository — the smart-HTTP endpoints
-    // (/git/<repoId>/info/refs, /git-upload-pack, /git-receive-pack) and the content reads qits-ci
-    // makes instead of cloning (/git/<repoId>/blob/<rev>/<path>, /git/<repoId>/tree/<rev>).
-    //
-    // It was /artifacts/git/ until the byte-plane split moved the git host out of qits-artifacts,
-    // and the scope is deliberately unchanged: the SAME subtree, neither widened nor narrowed.
-    //
-    // It is also unchanged by the service gaining a segment of its own. /git is the address git
-    // clients hardcode and rides qits-githost's entry as an extra prefix, so this line still names
-    // exactly the protocol surface. What stays behind the policy: the BARE /git — the repository
-    // listing, read by qits-ci on qits-net and asked for by no token-free caller here — the whole
-    // of /githost/*, which is a SPA and its API, read by a browser that has a session, and
-    // /githost/q, whose health and OpenAPI are a service's, covered by the gatewaysOwn note above.
-    //
-    // Session-free is not auth-free. The git host's own checks are the real ones and are unchanged
-    // by this line: the push token (-o qits.token=…, ProtectedRefHook) and the machine claims on a
-    // bearer. What this says is only that a caller with no BROWSER SESSION may reach them — which
-    // is
-    // every caller git has, since a clone cannot answer an oauth challenge.
-    path.startsWith("/git/")
-        // qits-artifacts' blob store is the whole of that service's JSON API. Token-free at the
-        // session layer: CI uploaders hold no session (writes are guarded by the static-token
-        // filter in the service), and reads have to work as a plain <img> src.
-        || path.equals("/artifacts/api")
-        || path.startsWith("/artifacts/api/")
-        // NOTHING of qits-ci is here any more, and the entry that used to be is worth recording
-        // rather than deleting silently. It was /ci/api/events/ — the git host's post-receive hook
-        // POSTing an accepted push, a caller that holds no session and could not have been given
-        // one. The git host does not call it: a push now becomes a durable domain event on the
-        // platform bus (SCMPublishCommit and its three siblings) which qits-ci consumes as a
-        // subscriber, so the one token-free caller this exemption existed for no longer exists.
-        // What is left behind that path is the manual trigger, which a person invokes and a person
-        // has a session for. An allowlist entry outliving its caller is an open intake nobody is
-        // watching, so it goes with the caller.
-        //
-        // NOTHING of qits-platform-deployments is here. Its one machine intake
-        // (/platform-deployments/api/events/build-succeeded) is called by qits-ci directly on the
-        // internal network and never traverses the gateway, so no caller asks for a session-free
-        // front-door spelling — and without one there is no token scheme to carry either: the
-        // whole of /platform-deployments/* stays behind the session policy, and intra-network
-        // callers are trusted. The reads are a browser's, which has a session. If a deployment ever
-        // points a machine intake through the gateway, an allowlist entry plus a write guard in the
-        // service come back TOGETHER; one without the other is either a dead token or an open
-        // intake.
-        // OTLP ingest from workspace containers and fixture SPAs. The exporters append
-        // /v1/<signal> to a literal endpoint, so the subtree is the unit.
-        || path.startsWith("/observability/api/otel/")
-        // The coding agent's MCP servers, called in-container. EXACT paths, not a subtree: these
-        // used to be a wildcard family (/mcp/<server>) because every service hung its server off a
-        // shared /mcp root and two of them both called it `repository`. Renaming observability's
-        // server is what collapsed that family into one path per service, and the allowlist should
-        // record the tightening rather than keep the old shape.
-        //
-        // Consequence, deliberate: quarkus-mcp-server-http also mounts the legacy SSE transport at
-        // <root>/sse under the same root path, and that is NOT public. The daemon dials these with
-        // McpServers.httpMcp — streamable HTTP, which is the root path itself — so nothing we ship
-        // needs the subtree. An SSE-transport client through the gateway would be challenged; add
-        // the sse path here, explicitly, if one ever appears.
-        || path.equals("/observability/mcp")
-        || path.equals("/projects/mcp")
-        // The in-container workspace-daemon's dial-home control socket. A websocket, and the one
-        // socket on this list; being public here is necessary because a daemon holds no user token.
-        //
-        // This used to say the open question was how a socket survives the gateway with
-        // SameOriginUpgradeCheck still seeing a real Origin/Host. That was wrong twice over. There
-        // is no SameOriginUpgradeCheck in Quarkus 3.34's websockets-next — the class does not
-        // exist — and the real defect was here: vertx-http-proxy skips its interceptor chain
-        // entirely on an upgrade, so EdgeHeaders never ran on a handshake. That is fixed
-        // (EdgeHeaders.applyToUpgrade), and this socket is unaffected either way: the daemon dials
-        // qits-workspaces directly on qits-net and never traverses the gateway at all.
-        || path.startsWith("/workspaces/daemon/")
-        // Cross-origin capture ingest from a fixture SPA (its own CORS route in the service).
-        || path.equals("/workspaces/api/capture");
+  private static boolean mirror(String path) {
+    return path.equals("/mirror") || path.startsWith("/mirror/");
   }
 }
